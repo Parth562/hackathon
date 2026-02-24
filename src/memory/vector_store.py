@@ -66,15 +66,16 @@ class MemoryManager:
         
     def retrieve_relevant_memories(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
         """
-        Retrieves memories relevant to the current user query or situation.
+        Retrieves memories relevantw to the current user query or situation.
         """
         vector = self.embeddings.embed_query(query)
         
-        search_result = self.client.search(
+        query_response = self.client.query_points(
             collection_name=self.collection_name,
-            query_vector=vector,
+            query=vector,
             limit=limit
         )
+        search_result = query_response.points
         
         return [
             {
