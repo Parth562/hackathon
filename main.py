@@ -1,17 +1,18 @@
 import os
 import sys
 import uuid
-from langchain_core.messages import HumanMessage
 from dotenv import load_dotenv
+
+# Load environment variables (expecting GROQ_API_KEY) BEFORE any langchain imports
+load_dotenv()
+
+from langchain_core.messages import HumanMessage
 
 # Ensure the src directory is in the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.agent.graph import app
 from src.agent.graph import memory_manager, structured_store
-
-# Load environment variables (expecting GROQ_API_KEY)
-load_dotenv()
 
 def run_agent(query: str, session_id: str = None):
     print(f"\n{'='*50}\nUser Request: {query}\n{'='*50}")
@@ -63,3 +64,9 @@ if __name__ == "__main__":
     
     # Test 3: Deep Mode request (Should utilize the pandas tools and remember preferences)
     run_agent("Compare MSFT vs GOOGL on fundamentals into a small table. What's the leader in market cap? Give a bull thesis for the winner.", test_session)
+    
+    # Clean up Qdrant client to prevent atexit shutdown errors in the local provider
+    try:
+        memory_manager.client.close()
+    except:
+        pass
