@@ -23,6 +23,10 @@ class AgentState(TypedDict):
     # Quick mode vs Deep mode determination
     research_mode: Optional[str] 
     
+    # Model tracking
+    model_name: Optional[str]
+    provider: Optional[str]
+    
     # Track which tools have run to avoid infinite loops or budget blows
     tools_used: List[str]
     

@@ -5,6 +5,7 @@ import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
 from duckduckgo_search import DDGS
+import json
 
 @tool
 def calculate_correlations(tickers: List[str], period: str = "1y") -> str:
@@ -49,12 +50,13 @@ def calculate_correlations(tickers: List[str], period: str = "1y") -> str:
                     # Round to 3 decimal places
                     result_dict[row][col] = round(float(corr_matrix.loc[row, col]), 3)
                     
-        return str({
+        return json.dumps({
+             "widget_type": "correlation_matrix",
              "period": period,
              "correlations": result_dict
         })
     except Exception as e:
-        return {"error": f"Failed to calculate correlations: {str(e)}"}
+        return json.dumps({"error": f"Failed to calculate correlations: {str(e)}"})
 
 @tool
 def find_leading_companies(tickers: List[str], metric: str = 'marketCap') -> str:
@@ -88,13 +90,14 @@ def find_leading_companies(tickers: List[str], metric: str = 'marketCap') -> str
         
         leader = df_sorted.iloc[0].to_dict()
         
-        return str({
+        return json.dumps({
+            "widget_type": "leading_companies",
             "metric": metric,
             "leader": leader,
             "all_data": df_sorted.to_dict(orient='records')
         })
     except Exception as e:
-        return {"error": f"Failed to find leading companies: {str(e)}"}
+        return json.dumps({"error": f"Failed to find leading companies: {str(e)}"})
 
 @tool
 def get_company_ecosystem(ticker: str) -> str:
@@ -119,9 +122,13 @@ def get_company_ecosystem(ticker: str) -> str:
             return f"No ecosystem data found for {ticker}."
             
         ecosystem_summary = " ".join(results)
-        return str({"ticker": ticker, "ecosystem_data": ecosystem_summary})
+        return json.dumps({
+            "widget_type": "ecosystem",
+            "ticker": ticker, 
+            "ecosystem_data": ecosystem_summary
+        })
     except Exception as e:
-        return str({"error": f"Failed to get ecosystem for {ticker}: {str(e)}"})
+        return json.dumps({"error": f"Failed to get ecosystem for {ticker}: {str(e)}"})
 
 @tool
 def get_insider_trading(ticker: str) -> str:
@@ -141,11 +148,15 @@ def get_insider_trading(ticker: str) -> str:
              data["insider_purchases"] = insider_purchases.to_dict(orient="records")
              
         if not data:
-             return f"No insider trading data readily available for {ticker}."
+             return json.dumps({"error": f"No insider trading data readily available for {ticker}."})
              
-        return str({"ticker": ticker, "insider_data": data})
+        return json.dumps({
+            "widget_type": "insider_trading",
+            "ticker": ticker, 
+            "insider_data": data
+        })
     except Exception as e:
-        return str({"error": f"Failed to get insider trading data for {ticker}: {str(e)}"})
+        return json.dumps({"error": f"Failed to get insider trading data for {ticker}: {str(e)}"})
 
 @tool
 def calculate_dcf(ticker: str, growth_rate: float = 0.05, discount_rate: float = 0.10, terminal_growth_rate: float = 0.02, years: int = 5) -> str:
@@ -205,6 +216,7 @@ def calculate_dcf(ticker: str, growth_rate: float = 0.05, discount_rate: float =
         implied_share_price = equity_value / shares_outstanding
         
         result = {
+            "widget_type": "dcf",
             "ticker": ticker,
             "inputs": {
                 "base_fcf": current_fcf,
@@ -221,7 +233,7 @@ def calculate_dcf(ticker: str, growth_rate: float = 0.05, discount_rate: float =
             }
         }
         
-        return str(result)
+        return json.dumps(result)
         
     except Exception as e:
-         return str({"error": f"Failed to run DCF calculation for {ticker}: {str(e)}"})
+         return json.dumps({"error": f"Failed to run DCF calculation for {ticker}: {str(e)}"})

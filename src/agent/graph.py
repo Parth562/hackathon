@@ -2,6 +2,7 @@ import os
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langchain_core.tools import tool
@@ -36,10 +37,18 @@ tools = [
      calculate_dcf
 ]
 
-# Quick check on key
-llm_model_name = "gemini-2.5-flash" # powerful overall model on Google AI
-def get_llm():
-     return ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1)
+# Dynamic LLM Loader
+def get_llm(state: AgentState = None):
+     model_name = "gemini-2.5-flash"
+     provider = "google"
+     if state:
+         model_name = state.get('model_name', model_name) or model_name
+         provider = state.get('provider', provider) or provider
+         
+     if provider == "ollama":
+         return ChatOllama(model=model_name, temperature=0.1)
+     else:
+         return ChatGoogleGenerativeAI(model=model_name, temperature=0.1)
 
 # Helper Node: Setup and routing
 def triage_node(state: AgentState) -> AgentState:
@@ -47,7 +56,7 @@ def triage_node(state: AgentState) -> AgentState:
     Determines if the request is Quick or Deep mode, extracts explicitly mentioned
     user preferences to store in Qdrant, and sets up the system prompt.
     """
-    llm = get_llm()
+    llm = get_llm(state)
     messages = state['messages']
     user_query = messages[-1].content if messages else ""
     
@@ -95,7 +104,7 @@ def research_agent_node(state: AgentState) -> AgentState:
     """
     The main reasoning node. Makes tool calls or provides final answers.
     """
-    llm = get_llm()
+    llm = get_llm(state)
     llm_with_tools = llm.bind_tools(tools)
     
     mode = state.get('research_mode', 'QUICK')
@@ -114,11 +123,10 @@ def research_agent_node(state: AgentState) -> AgentState:
     {memory}
     
     REQUIREMENTS:
-    - If the user asks to "draw", "render", or "show a graph" of a stock price or comparison, YOU ABSOLUTELY MUST CALL THE `render_stock_comparison_graph` OR `render_advanced_stock_graph` TOOL right away.
-    - If the user asks about the impact of supply chain correlations, use `get_company_ecosystem` to fetch inputs/outputs, then fetch their stock prices, and map the logic.
+    - If the user asks to "draw", "render", or "show a graph", MUST CALL `render_stock_comparison_graph` OR `render_advanced_stock_graph`.
+    - Explain your assumptions clearly! (e.g., 'Assuming standard PE ratios apply this quarter...').
     - If the user asks for a valuation or fair price, MUST USE the `calculate_dcf` tool to perform a Discounted Cash Flow model.
     - If the user asks about executives or insider actions, USE `get_insider_trading`.
-    - Explain your assumptions clearly! (e.g., 'Assuming standard PE ratios apply this quarter...').
     - If you see contradictions between your tool results (e.g., Yahoo Finance says price is up, but news says it's down), explicitly state them.
     - Suggest follow up questions the user could ask (e.g. 'Would you like to stress test under high inflation?').
     """
@@ -163,6 +171,32 @@ def synthesis_node(state: AgentState) -> AgentState:
                 text_parts.append(block)
         last_content = "\n".join(text_parts)
     
+    import json
+    import re
+
+    # Strip any LLM-hallucinated widget blocks to prevent corrupted JSON or duplicates
+    last_content = re.sub(r"```widget\n[\s\S]*?```", "", last_content)
+    
+    # Intercept pure tool payloads to guarantee front-end widget consistency
+    recent_tool_widgets = []
+    # Iterate backwards through messages to find tools executed during this specific round
+    for msg in reversed(messages[:-1]): # Exclude the final AIMessage itself
+        if isinstance(msg, HumanMessage):
+            break
+        if isinstance(msg, ToolMessage):
+            try:
+                # Try to parse the raw Python tool output as JSON
+                tool_data = json.loads(msg.content)
+                # Check if it has a widget signature
+                if isinstance(tool_data, dict) and ('widget_type' in tool_data or 'chart_type' in tool_data or 'type' in tool_data or 'all_data' in tool_data):
+                    widget_md = f"\n```widget\n{msg.content}\n```\n"
+                    recent_tool_widgets.append(widget_md)
+            except Exception:
+                pass
+
+    if recent_tool_widgets:
+        last_content += "\n" + "".join(recent_tool_widgets)
+
     # Ensure it's pushed back to the state so the chat history loop prints cleanly
     messages[-1].content = last_content
     
