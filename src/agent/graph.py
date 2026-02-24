@@ -30,7 +30,7 @@ tools = [
 ]
 
 # Quick check on key
-llm_model_name = "llama3-70b-8192" # powerful overall model on Groq
+llm_model_name = "llama-3.3-70b-versatile" # powerful overall model on Groq
 def get_llm():
      return ChatGroq(model=llm_model_name, temperature=0.1)
 
