@@ -3,7 +3,7 @@ from typing import Dict, Any
 from langchain_core.tools import tool
 
 @tool
-def get_stock_price(ticker: str) -> Dict[str, Any]:
+def get_stock_price(ticker: str) -> str:
     """
     Get the current stock price and recent market data for a given ticker symbol.
     """
@@ -19,17 +19,17 @@ def get_stock_price(ticker: str) -> Dict[str, Any]:
             if not hist.empty:
                 current_price = hist['Close'].iloc[-1]
                 
-        return {
+        return str({
             "ticker": ticker,
             "current_price": current_price,
             "previous_close": previous_close,
             "currency": info.get('currency', 'USD')
-        }
+        })
     except Exception as e:
-        return {"error": f"Failed to retrieve price for {ticker}: {str(e)}"}
+        return str({"error": f"Failed to retrieve price for {ticker}: {str(e)}"})
 
 @tool
-def get_financial_statements(ticker: str) -> Dict[str, Any]:
+def get_financial_statements(ticker: str) -> str:
     """
     Get key financial statements (Income Statement, Balance Sheet, Cash Flow) 
     summaries for the given ticker symbol to perform fundamental analysis.
@@ -63,12 +63,12 @@ def get_financial_statements(ticker: str) -> Dict[str, Any]:
             summary["operating_cash_flow"] = float(cf.loc['Operating Cash Flow'].iloc[0]) if 'Operating Cash Flow' in cf.index else None
             summary["free_cash_flow"] = float(cf.loc['Free Cash Flow'].iloc[0]) if 'Free Cash Flow' in cf.index else None
             
-        return summary
+        return str(summary)
     except Exception as e:
-        return {"error": f"Failed to retrieve financials for {ticker}: {str(e)}"}
+        return str({"error": f"Failed to retrieve financials for {ticker}: {str(e)}"})
 
 @tool
-def get_key_metrics(ticker: str) -> Dict[str, Any]:
+def get_key_metrics(ticker: str) -> str:
     """
     Get key financial metrics like PE ratio, ROE, margins, and 
     risk indicators for the given ticker symbol.
@@ -77,7 +77,7 @@ def get_key_metrics(ticker: str) -> Dict[str, Any]:
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        return {
+        return str({
             "ticker": ticker,
             "sector": info.get('sector'),
             "industry": info.get('industry'),
@@ -92,6 +92,34 @@ def get_key_metrics(ticker: str) -> Dict[str, Any]:
             "beta": info.get('beta'),
             "52_week_high": info.get('fiftyTwoWeekHigh'),
             "52_week_low": info.get('fiftyTwoWeekLow')
-        }
+        })
     except Exception as e:
-        return {"error": f"Failed to retrieve metrics for {ticker}: {str(e)}"}
+        return str({"error": f"Failed to retrieve metrics for {ticker}: {str(e)}"})
+
+@tool
+def get_options_data(ticker: str) -> str:
+    """
+    Get the future options bets (calls and puts) for the upcoming expiration date for a given ticker symbol.
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        expirations = stock.options
+        if not expirations:
+            return f"No options data available for {ticker}."
+        
+        # Get the nearest expiration date
+        nearest_expiry = expirations[0]
+        opt = stock.option_chain(nearest_expiry)
+        
+        calls = opt.calls.head(5)[['strike', 'lastPrice', 'impliedVolatility', 'volume']]
+        puts = opt.puts.head(5)[['strike', 'lastPrice', 'impliedVolatility', 'volume']]
+        
+        data = {
+            "ticker": ticker,
+            "nearest_expiration": nearest_expiry,
+            "top_calls": calls.to_dict(orient='records'),
+            "top_puts": puts.to_dict(orient='records')
+        }
+        return str(data)
+    except Exception as e:
+        return str({"error": f"Failed to retrieve options data for {ticker}: {str(e)}"})

@@ -3,7 +3,7 @@ import sys
 import uuid
 from dotenv import load_dotenv
 
-# Load environment variables (expecting GROQ_API_KEY) BEFORE any langchain imports
+# Load environment variables (expecting GEMINI_API_KEY) BEFORE any langchain imports
 load_dotenv()
 
 from langchain_core.messages import HumanMessage
@@ -47,8 +47,8 @@ def run_agent(query: str, session_id: str = None):
 
 if __name__ == "__main__":
     # Ensure api key exists
-    if not os.getenv("GROQ_API_KEY"):
-         print("ERROR: Please create a .env file with GROQ_API_KEY=your_key_here")
+    if not os.getenv("GEMINI_API_KEY"):
+         print("ERROR: Please create a .env file with GEMINI_API_KEY=your_key_here")
          sys.exit(1)
          
     # Generate a constant session for testing memory across calls

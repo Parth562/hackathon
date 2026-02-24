@@ -6,26 +6,26 @@ from bs4 import BeautifulSoup
 import time
 
 @tool
-def search_web(query: str, max_results: int = 5) -> List[Dict[str, str]]:
+def search_web(query: str, max_results: int = 5) -> str:
     """
     Search the web for recent news, reports, or articles using DuckDuckGo.
-    Returns a list of titles, links, and snippets.
+    Returns a formatted string of titles, links, and snippets.
     """
     try:
         results = []
         with DDGS() as ddgs:
             for r in ddgs.text(query, max_results=max_results):
-                results.append({
-                    "title": r.get("title", ""),
-                    "link": r.get("href", ""),
-                    "snippet": r.get("body", "")
-                })
-        return results
+                results.append(f"Title: {r.get('title', '')}\nURL: {r.get('href', '')}\nSnippet: {r.get('body', '')}\n")
+        
+        if not results:
+            return "No results found."
+            
+        return "\n---\n".join(results)
     except Exception as e:
-        return [{"error": f"Web search failed: {str(e)}"}]
+        return f"Web search failed: {str(e)}"
 
 @tool
-def scrape_webpage(url: str) -> Dict[str, str]:
+def scrape_webpage(url: str) -> str:
     """
     Scrape the text content of a single webpage using a headless browser.
     Useful for reading full investor relations announcements or news articles.
@@ -63,9 +63,9 @@ def scrape_webpage(url: str) -> Dict[str, str]:
             if len(clean_text) > max_chars:
                 clean_text = clean_text[:max_chars] + "\n...[Content Truncated]..."
                 
-            return {
+            return str({
                 "url": url,
                 "text": clean_text
-            }
+            })
     except Exception as e:
         return {"error": f"Failed to scrape {url}: {str(e)}"}

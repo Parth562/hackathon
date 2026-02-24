@@ -1,16 +1,17 @@
 import os
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
-from langchain_groq import ChatGroq
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from langchain_core.tools import tool
 
 # Local imports
 from .state import AgentState
-from src.tools.finance_tools import get_stock_price, get_financial_statements, get_key_metrics
+from src.tools.finance_tools import get_stock_price, get_financial_statements, get_key_metrics, get_options_data
 from src.tools.scraping_tools import search_web, scrape_webpage
-from src.tools.analysis_tools import calculate_correlations, find_leading_companies
+from src.tools.analysis_tools import calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading, calculate_dcf
+from src.tools.graphing_tools import render_stock_comparison_graph, render_advanced_stock_graph
 from src.memory.vector_store import MemoryManager
 from src.memory.sqlite_store import StructuredStore
 
@@ -26,13 +27,19 @@ tools = [
      search_web, 
      scrape_webpage, 
      calculate_correlations, 
-     find_leading_companies
+     find_leading_companies,
+     get_options_data,
+     render_stock_comparison_graph,
+     render_advanced_stock_graph,
+     get_company_ecosystem,
+     get_insider_trading,
+     calculate_dcf
 ]
 
 # Quick check on key
-llm_model_name = "llama-3.3-70b-versatile" # powerful overall model on Groq
+llm_model_name = "gemini-2.5-flash" # powerful overall model on Google AI
 def get_llm():
-     return ChatGroq(model=llm_model_name, temperature=0.1)
+     return ChatGoogleGenerativeAI(model=llm_model_name, temperature=0.1)
 
 # Helper Node: Setup and routing
 def triage_node(state: AgentState) -> AgentState:
@@ -107,6 +114,10 @@ def research_agent_node(state: AgentState) -> AgentState:
     {memory}
     
     REQUIREMENTS:
+    - If the user asks to "draw", "render", or "show a graph" of a stock price or comparison, YOU ABSOLUTELY MUST CALL THE `render_stock_comparison_graph` OR `render_advanced_stock_graph` TOOL right away.
+    - If the user asks about the impact of supply chain correlations, use `get_company_ecosystem` to fetch inputs/outputs, then fetch their stock prices, and map the logic.
+    - If the user asks for a valuation or fair price, MUST USE the `calculate_dcf` tool to perform a Discounted Cash Flow model.
+    - If the user asks about executives or insider actions, USE `get_insider_trading`.
     - Explain your assumptions clearly! (e.g., 'Assuming standard PE ratios apply this quarter...').
     - If you see contradictions between your tool results (e.g., Yahoo Finance says price is up, but news says it's down), explicitly state them.
     - Suggest follow up questions the user could ask (e.g. 'Would you like to stress test under high inflation?').
@@ -141,6 +152,19 @@ def synthesis_node(state: AgentState) -> AgentState:
     
     messages = state['messages']
     last_content = messages[-1].content
+    
+    # Handle Gemini-specific list structure to return clean text instead of a raw dictionary representation
+    if isinstance(last_content, list):
+        text_parts = []
+        for block in last_content:
+            if isinstance(block, dict) and 'text' in block:
+                text_parts.append(block['text'])
+            elif isinstance(block, str):
+                text_parts.append(block)
+        last_content = "\n".join(text_parts)
+    
+    # Ensure it's pushed back to the state so the chat history loop prints cleanly
+    messages[-1].content = last_content
     
     # In a full production app, we would use LLM structural extraction here to fill
     # the assumption list and confidence score. For hackathon scope, we trust the agent's prose 
