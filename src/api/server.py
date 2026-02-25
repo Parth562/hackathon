@@ -65,6 +65,74 @@ async def get_models():
         
     return {"models": models}
 
+from fastapi import UploadFile, File
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader
+import tempfile
+
+@app.post("/api/upload")
+def upload_document(file: UploadFile = File(...)):
+    """Uploads a company document, extracts text, chunks it, and stores in the Qdrant document collection."""
+    try:
+        # Create a temporary file to save the uploaded content
+        suffix = os.path.splitext(file.filename)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = file.file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        documents = []
+        if suffix.lower() == '.pdf':
+            loader = PyPDFLoader(tmp_path)
+            documents = loader.load()
+        elif suffix.lower() == '.txt':
+            # Simple text parsing
+            from langchain_core.documents import Document
+            with open(tmp_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+                documents = [Document(page_content=text, metadata={"source": file.filename})]
+        else:
+            os.unlink(tmp_path)
+            raise HTTPException(status_code=400, detail="Only PDF and TXT files are supported.")
+
+        # Chunk the documents
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=50,
+            length_function=len,
+        )
+        chunks = text_splitter.split_documents(documents)
+        
+        # Store in Qdrant using the document store
+        from src.tools.document_tools import document_store
+        
+        texts = [chunk.page_content for chunk in chunks]
+        metadatas = [{"source": file.filename, **(chunk.metadata if chunk.metadata else {})} for chunk in chunks]
+        
+        document_store.store_memories_batch(texts, metadatas=metadatas)
+            
+        os.unlink(tmp_path)
+        
+        return {"message": f"Successfully uploaded and processed {file.filename} into {len(chunks)} chunks.", "filename": file.filename}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/documents")
+def get_documents():
+    """Returns a list of all uniquely uploaded document filenames from the Qdrant store."""
+    try:
+        from src.tools.document_tools import document_store
+        sources = document_store.get_all_document_sources()
+        return {"documents": sources}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
     try:

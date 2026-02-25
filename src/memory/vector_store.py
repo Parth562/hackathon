@@ -5,6 +5,17 @@ import os
 import uuid
 from typing import List, Dict, Any, Optional
 
+# Singleton client to prevent multiple instances from locking the local database
+_qdrant_client = None
+
+def _get_qdrant_client():
+    global _qdrant_client
+    if _qdrant_client is None:
+        db_path = os.path.join(os.getcwd(), "qdrant_db")
+        os.makedirs(db_path, exist_ok=True)
+        _qdrant_client = QdrantClient(path=db_path)
+    return _qdrant_client
+
 class MemoryManager:
     """
     Manages long-term memory for the Agent using Qdrant.
@@ -14,9 +25,7 @@ class MemoryManager:
     def __init__(self, collection_name: str = "financial_memory"):
         # Use an in-memory client or a local file for the hackathon
         # To persist state, we map it to a local sqlite database format for qdrant
-        db_path = os.path.join(os.getcwd(), "qdrant_db")
-        os.makedirs(db_path, exist_ok=True)
-        self.client = QdrantClient(path=db_path)
+        self.client = _get_qdrant_client()
         
         self.collection_name = collection_name
         
@@ -63,6 +72,33 @@ class MemoryManager:
             ]
         )
         return point_id
+
+    def store_memories_batch(self, texts: List[str], metadatas: List[Dict[str, Any]] = None):
+        """
+        Stores multiple memories in a single batch to speed up embedding and network overhead.
+        """
+        if not texts:
+            return []
+            
+        metadatas = metadatas or [{} for _ in texts]
+        vectors = self.embeddings.embed_documents(texts)
+        
+        points = []
+        for text, meta, vector in zip(texts, metadatas, vectors):
+            point_id = str(uuid.uuid4())
+            points.append(
+                PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload={"text": text, **meta}
+                )
+            )
+            
+        self.client.upsert(
+            collection_name=self.collection_name,
+            points=points
+        )
+        return [p.id for p in points]
         
     def retrieve_relevant_memories(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
         """
@@ -105,3 +141,27 @@ class MemoryManager:
             return "No specific preferences remembered yet."
             
         return "\n".join([f"- {m}" for m in set(memories)])
+
+    def get_all_document_sources(self) -> List[str]:
+        """
+        Retrieves a list of all unique document sources uploaded and indexed in this collection.
+        Valuable for maintaining persistent UI state across reloads.
+        """
+        try:
+            results = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=1000, 
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            # Extract unique 'source' values from payload metadata
+            sources = set()
+            for point in results[0]:
+                if point.payload and 'source' in point.payload:
+                    sources.add(point.payload['source'])
+                    
+            return list(sources)
+        except Exception as e:
+            print(f"Error fetching document sources: {e}")
+            return []

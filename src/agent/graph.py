@@ -11,8 +11,9 @@ from langchain_core.tools import tool
 from .state import AgentState
 from src.tools.finance_tools import get_stock_price, get_financial_statements, get_key_metrics, get_options_data
 from src.tools.scraping_tools import search_web, scrape_webpage
-from src.tools.analysis_tools import calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading, calculate_dcf
+from src.tools.analysis_tools import calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading, calculate_dcf, create_custom_widget
 from src.tools.graphing_tools import render_stock_comparison_graph, render_advanced_stock_graph
+from src.tools.document_tools import search_company_documents
 from src.memory.vector_store import MemoryManager
 from src.memory.sqlite_store import StructuredStore
 
@@ -34,7 +35,9 @@ tools = [
      render_advanced_stock_graph,
      get_company_ecosystem,
      get_insider_trading,
-     calculate_dcf
+     calculate_dcf,
+     create_custom_widget,
+     search_company_documents
 ]
 
 # Dynamic LLM Loader
@@ -62,7 +65,16 @@ def triage_node(state: AgentState) -> AgentState:
     
     # 1. Fetch relevant long-term memories
     relevant_memories = memory_manager.retrieve_relevant_memories(user_query, limit=3)
-    memory_context = "\n".join([m['text'] for m in relevant_memories]) if relevant_memories else "No specific past context found."
+    memory_context = "User Preferences & History:\n" + ("\n".join([m['text'] for m in relevant_memories]) if relevant_memories else "No specific past context found.")
+    
+    # 1b. Fetch relevant company documents automatically
+    from src.tools.document_tools import document_store
+    relevant_docs = document_store.retrieve_relevant_memories(user_query, limit=5)
+    if relevant_docs:
+        memory_context += "\n\nRelevant Information from Uploaded Documents:\n"
+        for idx, hit in enumerate(relevant_docs):
+            source = hit.get('metadata', {}).get('source', 'Unknown Document')
+            memory_context += f"--- Excerpt {idx+1} (Source: {source}) ---\n{hit['text']}\n\n"
     
     # 2. Check if we need to store new preferences
     memory_extraction_prompt = f"""
@@ -78,7 +90,7 @@ def triage_node(state: AgentState) -> AgentState:
     if extraction_result and extraction_result.upper() != "NONE":
         memory_manager.store_memory(extraction_result, metadata={"type": "extracted_preference"})
         # Ensure we use it right now
-        memory_context += "\n" + extraction_result
+        memory_context += "\nNew Preference Tracked: " + extraction_result
     
     # 3. Classify Mode (Quick vs Deep)
     mode_classification_prompt = f"""
@@ -122,8 +134,11 @@ def research_agent_node(state: AgentState) -> AgentState:
     User Long-Term Memory & Preferences (Apply these to your analysis!):
     {memory}
     
-    REQUIREMENTS:
+    CRITICAL UI REQUIREMENTS - YOU MUST PRIORITIZE WIDGETS OVER TEXT:
+    - ALWAYS PREFER to display financial data, comparisons, and numbers using UI widgets. Do not output walls of text.
+    - If the user asks for ANY metrics, comparisons, or KPI tables, MUST USE the `create_custom_widget` tool with `content_type="metrics"`.
     - If the user asks to "draw", "render", or "show a graph", MUST CALL `render_stock_comparison_graph` OR `render_advanced_stock_graph`.
+    - If the user asks for a generic visual, diagram, chart, pie chart, or unformatted data visualization that is not covered by specific tools, YOU MUST use the `create_custom_widget` tool to build a UI widget. DO NOT say you cannot draw charts. Use `create_custom_widget` with `content_type="chart"` and provide the exact required JSON schema to render ANY data graphically.
     - Explain your assumptions clearly! (e.g., 'Assuming standard PE ratios apply this quarter...').
     - If the user asks for a valuation or fair price, MUST USE the `calculate_dcf` tool to perform a Discounted Cash Flow model.
     - If the user asks about executives or insider actions, USE `get_insider_trading`.

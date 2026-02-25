@@ -237,3 +237,32 @@ def calculate_dcf(ticker: str, growth_rate: float = 0.05, discount_rate: float =
         
     except Exception as e:
          return json.dumps({"error": f"Failed to run DCF calculation for {ticker}: {str(e)}"})
+
+@tool
+def create_custom_widget(title: str, content_type: str, data: dict) -> str:
+    """
+    Creates a flexible, custom UI widget to display arbitrary data that doesn't fit standard templates.
+    Use this when the user asks for a specific visual, customized data presentation, or unformatted text.
+    
+    Arguments:
+    - title: A short, descriptive title for the widget.
+    - content_type: Must be exactly 'markdown', 'metrics', or 'chart'.
+        - Use 'markdown' for formatted text, explanatory paragraphs, or markdown tables. The data dict should contain `{"content": "your markdown string"}`.
+        - Use 'metrics' for simple key-value pairs (e.g. `{"Revenue": "$10B", "Margin": "20%"}`). The data dict should be simply `{"metrics": {"Key": "Value", ...}}`.
+        - Use 'chart' for generic visualizations. The data dict MUST match exactly this schema:
+          `{"chart_data": {"x_axis_key": "name", "series": [{"dataKey": "value_key_1", "type": "bar", "color": "#hex_code"}, {"dataKey": "value_key_2", "type": "line", "color": "#hex_code"}], "data": [{"name": "Jan", "value_key_1": 100, "value_key_2": 50}]}}`
+    - data: A dictionary containing the payload according to the content_type chosen.
+    """
+    try:
+        if content_type not in ["markdown", "metrics", "chart"]:
+            return json.dumps({"error": "content_type must be 'markdown', 'metrics', or 'chart'"})
+            
+        result = {
+            "widget_type": "custom",
+            "title": title,
+            "content_type": content_type,
+            "data": data
+        }
+        return json.dumps(result)
+    except Exception as e:
+        return json.dumps({"error": f"Failed to create custom widget: {str(e)}"})
