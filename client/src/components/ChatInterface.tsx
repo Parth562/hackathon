@@ -25,6 +25,7 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
     const [selectedModel, setSelectedModel] = useState<any>(null);
     const [uploading, setUploading] = useState(false);
     const [uploadedDocs, setUploadedDocs] = useState<string[]>([]);
+    const [statusMessage, setStatusMessage] = useState<string>("Thinking...");
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -123,6 +124,7 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
         const newMsgId = Date.now().toString();
         setMessages(prev => [...prev, { id: newMsgId, role: 'user', content: userMessage }]);
         setLoading(true);
+        setStatusMessage("Starting agent...");
 
         try {
             const payload: any = { message: userMessage };
@@ -132,21 +134,55 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                 payload.provider = selectedModel.provider;
             }
 
-            const res = await fetch('http://localhost:8261/api/chat', {
+            const response = await fetch('http://localhost:8261/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
 
-            if (!res.ok) throw new Error('Network response was not ok');
-            const data = await res.json();
+            if (!response.ok) throw new Error('Network response was not ok');
+            
+            const reader = response.body?.getReader();
+            const decoder = new TextDecoder();
+            
+            if (!reader) throw new Error("No reader available");
 
-            if (!sessionId) setSessionId(data.session_id);
+            let finalContent = "";
+            let buffer = "";
 
-            // Parse response for widgets
-            const rawContent = data.response;
-            let finalContent = rawContent;
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                
+                // Process all complete lines
+                buffer = lines.pop() || ""; // Keep the last incomplete line in buffer
+                
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                        const data = JSON.parse(line);
+                        
+                        if (data.type === 'status') {
+                            setStatusMessage(data.content);
+                        } else if (data.type === 'result') {
+                            finalContent = data.response;
+                            if (data.session_id) setSessionId(data.session_id);
+                        } else if (data.type === 'error') {
+                            console.error("Agent Error:", data.content);
+                            finalContent = "⚠️ Error: " + data.content;
+                        }
+                    } catch (e) {
+                         console.error("Error parsing JSON line", e);
+                    }
+                }
+            }
 
+            // Parse finalContent for widgets (same logic as before)
+            const rawContent = finalContent;
+            
             // Look for ```widget blocks
             const widgetRegex = /```widget\n([\s\S]*?)```/g;
             let match;
@@ -182,6 +218,46 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
     };
 
     const [activeTab, setActiveTab] = useState<'chat' | 'library'>('chat');
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const handleDeleteDoc = async (docName: string) => {
+         if (!confirm(`Are you sure you want to delete ${docName}?`)) return;
+         try {
+             await fetch(`http://localhost:8261/api/documents/${docName}`, { method: 'DELETE' });
+             setUploadedDocs(prev => prev.filter(d => d !== docName));
+         } catch (e) { console.error(e); }
+    };
+
+    const handleManualSearch = async () => {
+        if (!searchQuery.trim()) return;
+        setLoading(true);
+        setStatusMessage("Searching documents...");
+        try {
+            const res = await fetch('http://localhost:8261/api/documents/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: searchQuery, limit: 3 })
+            });
+            const data = await res.json();
+            
+            // Inject results into chat
+            const resultsFormatted = data.results.map((r: any, i: number) => 
+                `**Result ${i+1}** (${r.source}, Score: ${(r.score*100).toFixed(0)}%)\n> "${r.text.substring(0, 200)}..."`
+            ).join('\n\n');
+            
+            setMessages(prev => [
+                ...prev,
+                { id: Date.now().toString(), role: 'user', content: `Search for: "${searchQuery}"` },
+                { id: (Date.now()+1).toString(), role: 'agent', content: resultsFormatted ? `Found these matches:\n\n${resultsFormatted}` : "No matches found." }
+            ]);
+            setActiveTab('chat');
+            setSearchQuery('');
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -278,7 +354,38 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                                 style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', fontSize: '0.85rem' }}
                             >
                                 {uploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
-                                Upload Document
+                                Add Document
+                            </button>
+                        </div>
+
+                        <div className="search-bar" style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
+                            <input 
+                                type="text" 
+                                placeholder="Search all documents..." 
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                style={{ 
+                                    flex: 1, 
+                                    padding: '8px 12px', 
+                                    borderRadius: '8px', 
+                                    border: '1px solid var(--panel-border)', 
+                                    background: 'rgba(0,0,0,0.2)', 
+                                    color: '#fff' 
+                                }}
+                                onKeyDown={(e) => e.key === 'Enter' && handleManualSearch()}
+                            />
+                            <button 
+                                onClick={handleManualSearch}
+                                style={{ 
+                                    padding: '8px 12px', 
+                                    borderRadius: '8px', 
+                                    border: '1px solid var(--panel-border)', 
+                                    background: 'var(--primary)', 
+                                    color: '#fff',
+                                    cursor: 'pointer'
+                                }}
+                            >
+                                Search
                             </button>
                         </div>
 
@@ -300,7 +407,21 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                                     }}>
                                         <Paperclip size={18} style={{ color: 'var(--primary)' }} />
                                         <div style={{ flex: 1, fontSize: '0.9rem', color: 'var(--foreground)' }}>{doc}</div>
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--accent)' }}>Indexed in Qdrant Vector Store</div>
+                                        <button 
+                                            onClick={() => handleDeleteDoc(doc)}
+                                            style={{ 
+                                                background: 'none', 
+                                                border: 'none', 
+                                                color: '#f85149', 
+                                                cursor: 'pointer',
+                                                padding: '4px',
+                                                borderRadius: '4px',
+                                                opacity: 0.7
+                                            }}
+                                            title="Delete Document"
+                                        >
+                                            ✕
+                                        </button>
                                     </div>
                                 ))}
                             </div>
@@ -344,7 +465,7 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                         {loading && (
                             <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', color: 'var(--accent)' }}>
                                 <Loader2 className="animate-spin" size={18} />
-                                <span style={{ fontSize: '0.9rem' }}>Analyzing data...</span>
+                                <span style={{ fontSize: '0.9rem' }}>{statusMessage}</span>
                             </div>
                         )}
                         <div ref={messagesEndRef} />

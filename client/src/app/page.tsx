@@ -6,11 +6,6 @@ import dynamic from 'next/dynamic';
 
 const DynamicBoard = dynamic(() => import('@/components/DynamicBoard'), {
   ssr: false,
-  loading: () => (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8b949e' }}>
-      Loading Interactive Board...
-    </div>
-  )
 });
 
 export default function Home() {

@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import urllib.request
 import json
 import sys
 import os
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -126,64 +128,160 @@ def get_documents():
     try:
         from src.tools.document_tools import document_store
         sources = document_store.get_all_document_sources()
+        # Sort for better UX
+        sources.sort()
         return {"documents": sources}
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+@app.delete("/api/documents/{filename}")
+def delete_document(filename: str):
+    """Deletes all chunks associated with a specific document filename."""
     try:
-        session_id = request.session_id or str(uuid.uuid4())
-        
-        # Retrieve existing session state or initialize a new one
-        if session_id in sessions:
-            state = sessions[session_id]
-            # Append new user message to existing history
-            state["messages"].append(HumanMessage(content=request.message))
+        from src.tools.document_tools import document_store
+        success = document_store.delete_document_by_source(filename)
+        if success:
+            return {"message": f"Successfully deleted {filename}"}
         else:
-            state = {
-                "messages": [HumanMessage(content=request.message)],
-                "session_id": session_id,
-                "model_name": request.model_name,
-                "provider": request.provider,
-                "tools_used": [],
-                "assumptions": [],
-                "confidence_score": 0.0,
-                "detected_contradictions": []
-            }
-        
-        # Invoke the graph with the full conversational state
-        final_state = agent_app.invoke(state)
-        
-        # Save the updated state back to the session store
-        sessions[session_id] = final_state
-        
-        messages = final_state.get('messages', [])
-        response_text = messages[-1].content if messages else "No response generated."
-        
-        return ChatResponse(
-            response=response_text,
-            session_id=session_id,
-            mode=final_state.get('research_mode', 'UNKNOWN')
-        )
+            raise HTTPException(status_code=500, detail="Failed to delete document from vector store.")
     except Exception as e:
         import traceback
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+class SimilaritySearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+
+@app.post("/api/documents/search")
+def search_documents(request: SimilaritySearchRequest):
+    """Performs a manual similarity search on the uploaded documents."""
+    try:
+        from src.tools.document_tools import document_store
+        results = document_store.retrieve_relevant_memories(request.query, limit=request.limit)
         
-        # Intercept Gemini Free Tier Rate Limiting string to avoid 500 error bombs on the frontend
-        error_msg = str(e)
-        if "429" in error_msg or "Quota" in error_msg or "rate-limit" in error_msg.lower():
-            friendly_text = "⚠️ **API Rate Limit Exceeded:** The free tier of Google Gemini only allows 15 requests per minute. Please wait about 30 seconds before sending another message or graphing a new stock."
-            return ChatResponse(
-                response=friendly_text,
-                session_id=request.session_id or "error",
-                mode="UNKNOWN"
-            )
+        # Format for frontend
+        formatted_results = []
+        for r in results:
+            formatted_results.append({
+                "text": r['text'],
+                "source": r['metadata'].get('source', 'Unknown'),
+                "score": r['score'],
+                "page": r['metadata'].get('page', None)
+            })
             
-        raise HTTPException(status_code=500, detail=error_msg)
+        return {"results": formatted_results}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat")
+async def chat_endpoint(request: ChatRequest):
+    session_id = request.session_id or str(uuid.uuid4())
+    
+    # Retrieve existing session state or initialize a new one
+    if session_id in sessions:
+        state = sessions[session_id]
+        # Append new user message to existing history
+        state["messages"].append(HumanMessage(content=request.message))
+    else:
+        state = {
+            "messages": [HumanMessage(content=request.message)],
+            "session_id": session_id,
+            "model_name": request.model_name,
+            "provider": request.provider,
+            "tools_used": [],
+            "assumptions": [],
+            "confidence_score": 0.0,
+            "detected_contradictions": []
+        }
+    
+    async def event_generator():
+        try:
+            # 1. Yield initial status
+            yield json.dumps({"type": "status", "content": "Initializing agent..."}) + "\n"
+            
+            # Local variable to track state updates
+            current_state = state.copy()
+            
+            # 2. Iterate through graph updates
+            async for event in agent_app.astream(state):
+                for node_name, node_state in event.items():
+                    
+                    # Update local tracking of state
+                    if isinstance(node_state, dict):
+                        current_state.update(node_state)
+                        # Special handling for list updates (append them instead of overwrite)
+                        if "messages" in node_state:
+                            # Note: In a real LangGraph, the reducer handles this. 
+                            # Here we just want to ensure we have the latest message for the response
+                            pass 
+
+                    if node_name == "triage":
+                        mode = node_state.get('research_mode', 'unknown')
+                        yield json.dumps({"type": "status", "content": f"Triaging request (Mode: {mode})..."}) + "\n"
+                    
+                    elif node_name == "agent":
+                        messages = node_state.get("messages", [])
+                        if messages:
+                            last_msg = messages[-1]
+                            if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
+                                tool_names = [tc.get('name', 'unknown') for tc in last_msg.tool_calls]
+                                yield json.dumps({"type": "status", "content": f"Executing tools: {', '.join(tool_names)}..."}) + "\n"
+                            else:
+                                yield json.dumps({"type": "status", "content": "Synthesizing final answer..."}) + "\n"
+                    
+                    elif node_name == "tools":
+                        yield json.dumps({"type": "status", "content": "Processing tool results..."}) + "\n"
+
+            # 3. Final response
+            # Instead of relying on the last partial update, we invoke the app once to get the FULL final state
+            # reliably if we missed any reducer logic, OR we just assume the last "agent" message is the answer.
+            
+            # Since 'astream' yields partial state updates, reconstructing the full state manually is error-prone without the reducers.
+            # However, running 'invoke' again is double-work.
+            # The best approach for this specific graph structure:
+            
+            # 'synthesis' step sets 'final_insight'.
+            if "final_insight" in current_state:
+                response_text = current_state["final_insight"]
+            else:
+                 # If 'final_insight' is missing, it means synthesis didn't run or update it.
+                 # We fallback to fetching the full state again to be safe.
+                 print("Warning: final_insight not found in stream, re-invoking for full state.")
+                 final_state_full = await agent_app.ainvoke(state)
+                 messages = final_state_full.get('messages', [])
+                 response_text = messages[-1].content if messages else "No response generated."
+                 current_state = final_state_full
+
+            # Update global session store
+            sessions[session_id] = current_state
+            
+            mode = current_state.get('research_mode', 'UNKNOWN')
+            
+            yield json.dumps({
+                "type": "result", 
+                "response": response_text,
+                "session_id": session_id,
+                "mode": mode
+            }) + "\n"
+
+        except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "Quota" in error_msg or "rate-limit" in error_msg.lower():
+                friendly_text = "⚠️ **API Rate Limit Exceeded:** The free tier of Google Gemini only allows 15 requests per minute. Please wait about 30 seconds."
+                yield json.dumps({"type": "result", "response": friendly_text, "session_id": session_id, "mode": "error"}) + "\n"
+            else:
+                import traceback
+                traceback.print_exc()
+                yield json.dumps({"type": "error", "content": f"Stream error: {str(e)}"}) + "\n"
+
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 if __name__ == "__main__":
     import uvicorn

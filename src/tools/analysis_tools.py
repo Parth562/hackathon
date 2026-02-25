@@ -104,31 +104,92 @@ def get_company_ecosystem(ticker: str) -> str:
     """
     Find the public companies that act as suppliers (inputs), customers (outputs), 
     or competitors to a given stock ticker. Helpful for supply-chain correlation and trade impacts.
+    
+    Returns a structured dictionary with keys 'suppliers', 'customers', and 'competitors',
+    each containing a list of company names or tickers if found.
     """
     try:
-        results = []
-        with DDGS() as ddgs:
-            # Search for top suppliers
-            for r in ddgs.text(f"{ticker} major suppliers companies supply chain", max_results=2):
-                results.append(f"Supplier Info: {r.get('body', '')}")
-            # Search for top customers
-            for r in ddgs.text(f"{ticker} major customers corporate", max_results=2):
-                results.append(f"Customer Info: {r.get('body', '')}")
-            # Search for top competitors
-            for r in ddgs.text(f"{ticker} main competitors market", max_results=2):
-                results.append(f"Competitor Info: {r.get('body', '')}")
+        results = {"suppliers": [], "customers": [], "competitors": []}
         
-        if not results:
-            return f"No ecosystem data found for {ticker}."
+        with DDGS() as ddgs:
+            # Helper to extract clean names from search snippets would be ideal, 
+            # but for now we will return the search snippets and rely on the LLM to parse them later
+            # OR we can assume the LLM reading this tool output will do the parsing.
             
-        ecosystem_summary = " ".join(results)
+            # Search for top suppliers
+            supplier_query = f"{ticker} major suppliers companies tickers"
+            for r in ddgs.text(supplier_query, max_results=3):
+                results["suppliers"].append(r.get('body', ''))
+
+            # Search for top customers
+            customer_query = f"{ticker} major customers companies tickers"
+            for r in ddgs.text(customer_query, max_results=3):
+                results["customers"].append(r.get('body', ''))
+
+            # Search for top competitors
+            competitor_query = f"{ticker} main competitors market tickers"
+            for r in ddgs.text(competitor_query, max_results=3):
+                results["competitors"].append(r.get('body', ''))
+        
         return json.dumps({
             "widget_type": "ecosystem",
             "ticker": ticker, 
-            "ecosystem_data": ecosystem_summary
+            "ecosystem_data": results
         })
     except Exception as e:
         return json.dumps({"error": f"Failed to get ecosystem for {ticker}: {str(e)}"})
+
+@tool
+def analyze_supply_chain_impact(target_ticker: str, supplier_tickers: List[str], customer_tickers: List[str]) -> str:
+    """
+    Analyzes the correlation and impact of suppliers and customers on the target company's stock.
+    Automatically fetches stock data for the provided tickers and the target, then looks for correlation.
+    
+    Arguments:
+    - target_ticker: The main company being analyzed
+    - supplier_tickers: List of identified supplier tickers (e.g. ['TSM', 'FOXA'])
+    - customer_tickers: List of identified customer tickers (e.g. ['AAPL', 'MSFT'])
+    """
+    try:
+        all_tickers = [target_ticker] + supplier_tickers + customer_tickers
+        if len(all_tickers) < 2:
+            return json.dumps({"error": "Not enough tickers provided to analyze supply chain impact."})
+            
+        # Get data for last 6 months
+        period = "6mo"
+        data = yf.download(all_tickers, period=period, progress=False)['Close']
+        
+        # Calculate monthly correlation
+        returns = data.pct_change().dropna()
+        corr_matrix = returns.corr()
+        
+        # Extract correlations relative to target
+        impact_analysis = {
+            "target": target_ticker,
+            "period": period,
+            "supplier_impact": {},
+            "customer_impact": {}
+        }
+        
+        if target_ticker in corr_matrix:
+            for t in supplier_tickers:
+                if t in corr_matrix:
+                    val = corr_matrix.loc[target_ticker, t]
+                    impact_analysis["supplier_impact"][t] = round(float(val), 3)
+            
+            for t in customer_tickers:
+                if t in corr_matrix:
+                    val = corr_matrix.loc[target_ticker, t]
+                    impact_analysis["customer_impact"][t] = round(float(val), 3)
+
+        return json.dumps({
+            "widget_type": "supply_chain_impact",
+            "analysis": impact_analysis,
+            "correlation_matrix": corr_matrix.to_dict()
+        })
+    except Exception as e:
+        return json.dumps({"error": f"Failed to analyze supply chain impact: {str(e)}"})
+
 
 @tool
 def get_insider_trading(ticker: str) -> str:

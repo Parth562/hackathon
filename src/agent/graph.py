@@ -11,7 +11,7 @@ from langchain_core.tools import tool
 from .state import AgentState
 from src.tools.finance_tools import get_stock_price, get_financial_statements, get_key_metrics, get_options_data
 from src.tools.scraping_tools import search_web, scrape_webpage
-from src.tools.analysis_tools import calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading, calculate_dcf, create_custom_widget
+from src.tools.analysis_tools import calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading, calculate_dcf, create_custom_widget, analyze_supply_chain_impact
 from src.tools.graphing_tools import render_stock_comparison_graph, render_advanced_stock_graph
 from src.tools.document_tools import search_company_documents
 from src.memory.vector_store import MemoryManager
@@ -37,7 +37,8 @@ tools = [
      get_insider_trading,
      calculate_dcf,
      create_custom_widget,
-     search_company_documents
+     search_company_documents,
+     analyze_supply_chain_impact
 ]
 
 # Dynamic LLM Loader
@@ -141,6 +142,7 @@ def research_agent_node(state: AgentState) -> AgentState:
     - If the user asks for a generic visual, diagram, chart, pie chart, or unformatted data visualization that is not covered by specific tools, YOU MUST use the `create_custom_widget` tool to build a UI widget. DO NOT say you cannot draw charts. Use `create_custom_widget` with `content_type="chart"` and provide the exact required JSON schema to render ANY data graphically.
     - Explain your assumptions clearly! (e.g., 'Assuming standard PE ratios apply this quarter...').
     - If the user asks for a valuation or fair price, MUST USE the `calculate_dcf` tool to perform a Discounted Cash Flow model.
+    - If the user asks about supply chain analysis, suppliers, or customers, MUST USE the `analyze_supply_chain_impact` tool.
     - If the user asks about executives or insider actions, USE `get_insider_trading`.
     - If you see contradictions between your tool results (e.g., Yahoo Finance says price is up, but news says it's down), explicitly state them.
     - Suggest follow up questions the user could ask (e.g. 'Would you like to stress test under high inflation?').

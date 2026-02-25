@@ -123,6 +123,31 @@ class MemoryManager:
             for hit in search_result
         ]
         
+    def delete_document_by_source(self, source_filename: str) -> bool:
+        """
+        Deletes all chunks associated with a specific document source.
+        Useful for removing deprecated or incorrect documents.
+        """
+        try:
+            from qdrant_client import models
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="source",
+                                match=models.MatchValue(value=source_filename),
+                            ),
+                        ],
+                    )
+                ),
+            )
+            return True
+        except Exception as e:
+            print(f"Failed to delete document {source_filename}: {e}")
+            return False
+
     def get_all_preferences_summary(self) -> str:
         """
         Retrieves a summary of all explicit user preferences stored (risk, kpis, etc)
@@ -145,9 +170,34 @@ class MemoryManager:
     def get_all_document_sources(self) -> List[str]:
         """
         Retrieves a list of all unique document sources uploaded and indexed in this collection.
-        Valuable for maintaining persistent UI state across reloads.
+        This iterates through payloads to find unique 'source' metadata keys.
         """
         try:
+            # Scroll through the collection to collect all unique sources
+            # This is not efficient for millions of docs but fine for a hackathon
+            has_more = True
+            next_offset = None
+            sources = set()
+            
+            while has_more:
+                results, next_offset = self.client.scroll(
+                    collection_name=self.collection_name,
+                    limit=100,
+                    offset=next_offset,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                
+                for point in results:
+                    if point.payload and "source" in point.payload:
+                        sources.add(point.payload["source"])
+                
+                has_more = next_offset is not None
+            
+            return list(sources)
+        except Exception as e:
+            print(f"Error fetching document sources: {e}")
+            return []
             results = self.client.scroll(
                 collection_name=self.collection_name,
                 limit=1000, 

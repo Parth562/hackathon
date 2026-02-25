@@ -3,7 +3,7 @@
 import React from 'react';
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-    ComposedChart, Bar
+    ComposedChart, Bar, PieChart, Pie, Cell // Removed RadialBar due to complexity with re-exports for now
 } from 'recharts';
 
 interface ChartWidgetProps {
@@ -14,6 +14,8 @@ interface ChartWidgetProps {
 export default function ChartWidget({ data, onClose }: ChartWidgetProps) {
     // Determine if this is a comparison chart or advanced single stock chart
     const isComparison = data.chart_type === "comparison";
+    const isPie = data.chart_type === "pie";
+    const isBar = data.chart_type === "bar";
 
     if (data.error) {
         return (
@@ -26,9 +28,47 @@ export default function ChartWidget({ data, onClose }: ChartWidgetProps) {
 
     // Pre-process data for specific chart types
     let chartContent = null;
-    const colors = ["#58a6ff", "#bc8cff", "#238636", "#d2a8ff", "#3fb950"];
+    const colors = ["#58a6ff", "#bc8cff", "#238636", "#d2a8ff", "#3fb950", "#f78166", "#e3b341"]; // Extended palette
 
-    if (isComparison && data.series) {
+    if (isPie && data.data) {
+        chartContent = (
+            <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                    <Pie
+                        data={data.data}
+                        cx="50%"
+                        cy="50%"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                    >
+                        {data.data.map((entry: any, index: number) => (
+                            <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                        ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: 'rgba(13, 17, 23, 0.9)', borderRadius: '8px', border: 'none' }} />
+                    <Legend />
+                </PieChart>
+            </ResponsiveContainer>
+        );
+    } else if (isBar && data.data) {
+        chartContent = (
+             <ResponsiveContainer width="100%" height={350}>
+                <ComposedChart data={data.data} layout="vertical" margin={{ left: 20 }}>
+                    <CartesianGrid stroke="#444" strokeDasharray="3 3" horizontal={false} />
+                     <XAxis type="number" stroke="#8b949e" />
+                     <YAxis dataKey="name" type="category" stroke="#8b949e" width={100} />
+                     <Tooltip contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #30363d' }} cursor={{fill: 'rgba(255,255,255,0.1)'}} />
+                     <Bar dataKey="value" fill="#58a6ff" radius={[0, 4, 4, 0]} barSize={20}>
+                        {data.data.map((entry: any, index: number) => (
+                            <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />
+                        ))}
+                     </Bar>
+                </ComposedChart>
+            </ResponsiveContainer>
+        );
+    } else if (isComparison && data.series) {
         // Transform arrays of {date, value} per ticker into one array of {date, AAPL_val, MSFT_val} for recharts
         const dateMap = new Map();
         data.series.forEach((s: any) => {
@@ -67,7 +107,8 @@ export default function ChartWidget({ data, onClose }: ChartWidgetProps) {
             </ResponsiveContainer>
         );
     } else if (!isComparison && data.data) {
-        const title = `${data.ticker} - Advanced Analysis (${data.period})`;
+        // Handle Advanced Stock Graph 
+        const title = data.title || `${data.ticker} - Advanced Analysis (${data.period})`;
 
         // Basic line chart mapping for advanced single stock right now (candlestick requires custom shape in recharts or complex composed)
         chartContent = (
@@ -85,10 +126,8 @@ export default function ChartWidget({ data, onClose }: ChartWidgetProps) {
                         <Legend />
                         <Bar yAxisId="vol" dataKey="volume" fill="rgba(88, 166, 255, 0.2)" name="Volume" />
                         <Line yAxisId="price" type="monotone" dataKey="close" stroke="var(--primary)" strokeWidth={3} dot={false} name="Close Price" />
-                        {data.moving_averages && data.moving_averages.map((ma: number, idx: number) => (
-                            // Visual mock for MAs since we didn't pre-calculate them on backend, but this proves the concept
-                            // In production, backend json would explicitly carry MA values for each data point
-                            null
+                        {data.supplier_series && data.supplier_series.map((s: any, idx: number) => (
+                             <Line key={s.ticker} yAxisId="price" type="monotone" dataKey={s.ticker} stroke={colors[(idx + 1) % colors.length]} strokeDasharray="5 5" name={`Supplier: ${s.ticker}`} dot={false} />
                         ))}
                     </ComposedChart>
                 </ResponsiveContainer>
