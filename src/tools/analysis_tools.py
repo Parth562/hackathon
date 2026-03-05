@@ -1,10 +1,6 @@
 from typing import Dict, Any, List
 from langchain_core.tools import tool
-import pandas as pd
-import yfinance as yf
-import numpy as np
 from datetime import datetime, timedelta
-from duckduckgo_search import DDGS
 import json
 
 @tool
@@ -18,7 +14,8 @@ def calculate_correlations(tickers: List[str], period: str = "1y") -> str:
         if len(tickers) < 2:
             return {"error": "Need at least two tickers to calculate correlation."}
             
-        # Download historical data for all tickers
+        import pandas as pd
+        import yfinance as yf
         data = yf.download(tickers, period=period, group_by='ticker', auto_adjust=True, progress=False)
         
         # Extract closing prices
@@ -69,6 +66,8 @@ def find_leading_companies(tickers: List[str], metric: str = 'marketCap') -> str
          return {"error": f"Invalid metric '{metric}'. Choose from {valid_metrics}"}
          
     try:
+        import yfinance as yf
+        import pandas as pd
         results = []
         for ticker in tickers:
             stock = yf.Ticker(ticker)
@@ -109,6 +108,7 @@ def get_company_ecosystem(ticker: str) -> str:
     each containing a list of company names or tickers if found.
     """
     try:
+        from duckduckgo_search import DDGS
         results = {"suppliers": [], "customers": [], "competitors": []}
         
         with DDGS() as ddgs:
@@ -151,6 +151,8 @@ def analyze_supply_chain_impact(target_ticker: str, supplier_tickers: List[str],
     - customer_tickers: List of identified customer tickers (e.g. ['AAPL', 'MSFT'])
     """
     try:
+        import yfinance as yf
+        import pandas as pd
         all_tickers = [target_ticker] + supplier_tickers + customer_tickers
         if len(all_tickers) < 2:
             return json.dumps({"error": "Not enough tickers provided to analyze supply chain impact."})
@@ -198,6 +200,7 @@ def get_insider_trading(ticker: str) -> str:
     High insider buying is typically a bullish signal, while heavy selling might be bearish.
     """
     try:
+        import yfinance as yf
         stock = yf.Ticker(ticker)
         insider_roster = stock.insider_roster_holders
         insider_purchases = stock.insider_purchases
@@ -232,6 +235,7 @@ def calculate_dcf(ticker: str, growth_rate: float = 0.05, discount_rate: float =
     - years: Projection period (e.g. 5)
     """
     try:
+        import yfinance as yf
         stock = yf.Ticker(ticker)
         cf = stock.cashflow
         

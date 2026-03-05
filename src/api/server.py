@@ -74,7 +74,7 @@ import tempfile
 
 @app.post("/api/upload")
 def upload_document(file: UploadFile = File(...)):
-    """Uploads a company document, extracts text, chunks it, and stores in the Qdrant document collection."""
+    """Uploads a company document, extracts text, chunks it, and stores in the FAISS document index."""
     try:
         # Create a temporary file to save the uploaded content
         suffix = os.path.splitext(file.filename)[1]
@@ -99,13 +99,12 @@ def upload_document(file: UploadFile = File(...)):
 
         # Chunk the documents
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50,
+            chunk_size=2000,
+            chunk_overlap=200,
             length_function=len,
         )
         chunks = text_splitter.split_documents(documents)
         
-        # Store in Qdrant using the document store
         from src.tools.document_tools import document_store
         
         texts = [chunk.page_content for chunk in chunks]
@@ -124,7 +123,7 @@ def upload_document(file: UploadFile = File(...)):
 
 @app.get("/api/documents")
 def get_documents():
-    """Returns a list of all uniquely uploaded document filenames from the Qdrant store."""
+    """Returns a list of all uniquely uploaded document filenames from the FAISS index."""
     try:
         from src.tools.document_tools import document_store
         sources = document_store.get_all_document_sources()
@@ -209,34 +208,36 @@ async def chat_endpoint(request: ChatRequest):
             current_state = state.copy()
             
             # 2. Iterate through graph updates
-            async for event in agent_app.astream(state):
-                for node_name, node_state in event.items():
-                    
-                    # Update local tracking of state
-                    if isinstance(node_state, dict):
-                        current_state.update(node_state)
-                        # Special handling for list updates (append them instead of overwrite)
-                        if "messages" in node_state:
-                            # Note: In a real LangGraph, the reducer handles this. 
-                            # Here we just want to ensure we have the latest message for the response
-                            pass 
-
-                    if node_name == "triage":
-                        mode = node_state.get('research_mode', 'unknown')
-                        yield json.dumps({"type": "status", "content": f"Triaging request (Mode: {mode})..."}) + "\n"
-                    
-                    elif node_name == "agent":
-                        messages = node_state.get("messages", [])
-                        if messages:
-                            last_msg = messages[-1]
-                            if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
-                                tool_names = [tc.get('name', 'unknown') for tc in last_msg.tool_calls]
-                                yield json.dumps({"type": "status", "content": f"Executing tools: {', '.join(tool_names)}..."}) + "\n"
-                            else:
-                                yield json.dumps({"type": "status", "content": "Synthesizing final answer..."}) + "\n"
-                    
-                    elif node_name == "tools":
-                        yield json.dumps({"type": "status", "content": "Processing tool results..."}) + "\n"
+            async for event_mode, event_payload in agent_app.astream(state, stream_mode=["messages", "updates"]):
+                if event_mode == "messages":
+                    chunk, metadata = event_payload
+                    if chunk.type == "ai" and isinstance(chunk.content, str) and chunk.content:
+                        if not getattr(chunk, "tool_calls", None):
+                            yield json.dumps({"type": "token", "content": chunk.content}) + "\n"
+                            
+                elif event_mode == "updates":
+                    for node_name, node_state in event_payload.items():
+                        
+                        # Update local tracking of state
+                        if isinstance(node_state, dict):
+                            current_state.update(node_state)
+                            
+                        if node_name == "triage":
+                            mode = node_state.get('research_mode', 'unknown')
+                            yield json.dumps({"type": "status", "content": f"Triaging request (Mode: {mode})..."}) + "\n"
+                        
+                        elif node_name == "agent":
+                            messages = node_state.get("messages", [])
+                            if messages:
+                                last_msg = messages[-1]
+                                if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
+                                    tool_names = [tc.get('name', 'unknown') for tc in last_msg.tool_calls]
+                                    yield json.dumps({"type": "status", "content": f"Executing tools: {', '.join(tool_names)}..."}) + "\n"
+                                else:
+                                    yield json.dumps({"type": "status", "content": "Synthesizing final answer..."}) + "\n"
+                        
+                        elif node_name == "tools":
+                            yield json.dumps({"type": "status", "content": "Processing tool results..."}) + "\n"
 
             # 3. Final response
             # Instead of relying on the last partial update, we invoke the app once to get the FULL final state

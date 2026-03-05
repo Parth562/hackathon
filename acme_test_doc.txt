@@ -1,5 +1,0 @@
-This is a highly confidential internal document for Acme Corp.
-Acme Corp has decided to pivot its entire business model towards manufacturing giant robotic penguins for theme parks.
-The new CEO of Acme Corp is Dr. P. Enguin.
-Our Q3 revenue projection is $150 Million.
-Risk factor: The penguins might become sentient and escape.

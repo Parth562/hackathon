@@ -37,7 +37,7 @@ export default function SupplyChainWidget({ data, onClose }: { data: any; onClos
                             <Tooltip 
                                 contentStyle={{ backgroundColor: '#0d1117', border: '1px solid #30363d', borderRadius: '6px' }}
                                 cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                                formatter={(value: number) => [value.toFixed(2), 'Correlation']}
+                                formatter={(value: any) => [typeof value === 'number' ? value.toFixed(2) : value, 'Correlation']}
                             />
                             <Bar dataKey="correlation" fill={color} radius={[0, 4, 4, 0]} barSize={20}>
                                 {chartData.map((entry, index) => (

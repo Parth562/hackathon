@@ -1,4 +1,3 @@
-import yfinance as yf
 from typing import Dict, Any
 from langchain_core.tools import tool
 
@@ -8,6 +7,7 @@ def get_stock_price(ticker: str) -> str:
     Get the current stock price and recent market data for a given ticker symbol.
     """
     try:
+        import yfinance as yf
         stock = yf.Ticker(ticker)
         info = stock.info
         current_price = info.get('currentPrice', info.get('regularMarketPrice'))
@@ -35,6 +35,7 @@ def get_financial_statements(ticker: str) -> str:
     summaries for the given ticker symbol to perform fundamental analysis.
     """
     try:
+        import yfinance as yf
         stock = yf.Ticker(ticker)
         
         # Get the most recent annual data
@@ -74,6 +75,7 @@ def get_key_metrics(ticker: str) -> str:
     risk indicators for the given ticker symbol.
     """
     try:
+        import yfinance as yf
         stock = yf.Ticker(ticker)
         info = stock.info
         
@@ -102,6 +104,7 @@ def get_options_data(ticker: str) -> str:
     Get the future options bets (calls and puts) for the upcoming expiration date for a given ticker symbol.
     """
     try:
+        import yfinance as yf
         stock = yf.Ticker(ticker)
         expirations = stock.options
         if not expirations:

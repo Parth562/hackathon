@@ -3,7 +3,7 @@ import sys
 import uuid
 from dotenv import load_dotenv
 
-# Load environment variables (expecting GEMINI_API_KEY) BEFORE any langchain/qdrant imports
+# Load environment variables BEFORE any langchain imports
 load_dotenv()
 
 from langchain_core.messages import HumanMessage
@@ -72,8 +72,4 @@ if __name__ == "__main__":
          
     chat_loop()
     
-    # Try to close Qdrant gracefully
-    try:
-        memory_manager.client.close()
-    except Exception:
-        pass
+

@@ -2,16 +2,17 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import ReactFlow, {
-  Background,
-  Controls,
-  useNodesState,
-  useEdgesState,
-  addEdge,
-  Connection,
-  Edge,
-  applyNodeChanges,
-  NodeChange,
-  ConnectionMode
+    Background,
+    Controls,
+    useNodesState,
+    useEdgesState,
+    addEdge,
+    Connection,
+    Edge,
+    Node,
+    applyNodeChanges,
+    NodeChange,
+    ConnectionMode
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
@@ -23,7 +24,7 @@ interface DynamicBoardProps {
 }
 
 const nodeTypes = {
-  customWidget: GenericWidgetNode,
+    customWidget: GenericWidgetNode,
 };
 
 export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardProps) {
@@ -33,30 +34,30 @@ export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardPr
 
     // Sync incoming widgets with ReactFlow nodes
     useEffect(() => {
-        setNodes((nds) => {
+        setNodes((nds: Node[]) => {
             const currentIds = new Set(nds.map((n) => n.id));
             const newNodes = [...nds];
             let hasChanges = false;
-            
+
             widgets.forEach((w, index) => {
                 // If this widget isn't already a node, add it
                 if (!currentIds.has(w.id)) {
                     hasChanges = true;
                     // Simple auto-layout: 2 columns 
                     // x,y logic: (idx % 2 * 600), (floor(idx / 2) * 500)
-                    const x = (index % 2) * 600 + 50; 
+                    const x = (index % 2) * 600 + 50;
                     const y = Math.floor(index / 2) * 500 + 50;
 
                     newNodes.push({
                         id: w.id,
                         type: 'customWidget',
                         position: { x, y },
-                        data: { 
-                            widgetData: w.data, 
-                            onRemove: () => onRemoveWidget(w.id) 
+                        data: {
+                            widgetData: w.data,
+                            onRemove: () => onRemoveWidget(w.id)
                         },
                         // Default size so the resizer knows where handles start
-                        style: { width: 550, height: 450 }, 
+                        style: { width: 550, height: 450 },
                         dragHandle: '.drag-handle', // allow dragging only by header
                     });
                 }
@@ -86,6 +87,12 @@ export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardPr
         [onRemoveWidget]
     );
 
+    // Handle user drawing connections between widgets
+    const onConnect = useCallback(
+        (params: Edge | Connection) => setEdges((eds: Edge[]) => addEdge({ ...params, type: 'smoothstep', animated: true, style: { stroke: 'var(--primary)', strokeWidth: 2 } }, eds)),
+        [setEdges]
+    );
+
     if (widgets.length === 0) {
         return (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8b949e' }}>
@@ -103,6 +110,7 @@ export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardPr
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onNodesDelete={onNodesDelete}
+                onConnect={onConnect}
                 nodeTypes={nodeTypes}
                 minZoom={0.1}
                 maxZoom={4}
@@ -111,9 +119,9 @@ export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardPr
                 deleteKeyCode={["Backspace", "Delete"]}
                 multiSelectionKeyCode={["Control", "Shift"]}
                 selectionKeyCode={["Shift"]}
-                panOnScroll={true} 
-                selectionOnDrag={true} 
-                panOnDrag={[1, 2]} 
+                panOnScroll={true}
+                selectionOnDrag={true}
+                panOnDrag={[1, 2]}
                 fitView
             >
                 <Background color="#30363d" gap={20} size={1} />

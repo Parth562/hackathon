@@ -43,22 +43,22 @@ tools = [
 
 # Dynamic LLM Loader
 def get_llm(state: AgentState = None):
-     model_name = "gemini-2.5-flash"
-     provider = "google"
+     model_name = "glm-5:cloud"
+     provider = "ollama"
      if state:
          model_name = state.get('model_name', model_name) or model_name
          provider = state.get('provider', provider) or provider
          
      if provider == "ollama":
-         return ChatOllama(model=model_name, temperature=0.1)
+         return ChatOllama(model=model_name, temperature=0.1, streaming=True, base_url="http://localhost:11434")
      else:
-         return ChatGoogleGenerativeAI(model=model_name, temperature=0.1)
+         return ChatGoogleGenerativeAI(model=model_name, temperature=0.1, streaming=True)
 
 # Helper Node: Setup and routing
 def triage_node(state: AgentState) -> AgentState:
     """
     Determines if the request is Quick or Deep mode, extracts explicitly mentioned
-    user preferences to store in Qdrant, and sets up the system prompt.
+    user preferences to store in memory, and sets up the system prompt.
     """
     llm = get_llm(state)
     messages = state['messages']
@@ -68,12 +68,43 @@ def triage_node(state: AgentState) -> AgentState:
     relevant_memories = memory_manager.retrieve_relevant_memories(user_query, limit=3)
     memory_context = "User Preferences & History:\n" + ("\n".join([m['text'] for m in relevant_memories]) if relevant_memories else "No specific past context found.")
     
-    # 1b. Fetch relevant company documents automatically
+    # 1b. Fetch relevant company documents automatically with Query Expansion
     from src.tools.document_tools import document_store
-    relevant_docs = document_store.retrieve_relevant_memories(user_query, limit=5)
-    if relevant_docs:
+    
+    # Generate variations of the query for better semantic search
+    expansion_prompt = f"""
+    You are an expert financial search query generator.
+    Your task is to generate 3 different versions of the given user query to optimize document retrieval from a vector database.
+    By generating multiple perspectives, we can overcome limitations of distance-based similarity search.
+    Provide these alternative questions separated by newlines. DO NOT number them or add any other text.
+    
+    Original query: {user_query}
+    """
+    try:
+        variations_text = llm.invoke([HumanMessage(content=expansion_prompt)]).content
+        queries = [q.strip() for q in variations_text.split('\n') if q.strip()]
+        queries.append(user_query) # Always include original
+    except Exception:
+        queries = [user_query]
+        
+    all_hits = []
+    seen_texts = set()
+
+    for q in queries:
+        hits = document_store.retrieve_relevant_memories(q, limit=3, use_mmr=True)
+        for hit in hits:
+            # Dedup by text content (MMR returns id='' so can't use id)
+            text_key = hit['text'][:120]
+            if text_key not in seen_texts:
+                seen_texts.add(text_key)
+                all_hits.append(hit)
+
+    # Sort distinct hits by score (MMR hits have score=None; put them last)
+    all_hits = sorted(all_hits, key=lambda x: x.get('score') or 0, reverse=True)[:5]
+    
+    if all_hits:
         memory_context += "\n\nRelevant Information from Uploaded Documents:\n"
-        for idx, hit in enumerate(relevant_docs):
+        for idx, hit in enumerate(all_hits):
             source = hit.get('metadata', {}).get('source', 'Unknown Document')
             memory_context += f"--- Excerpt {idx+1} (Source: {source}) ---\n{hit['text']}\n\n"
     

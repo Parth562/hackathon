@@ -1,11 +1,13 @@
 langchain
-langchain-openai
 langchain-google-genai
 langchain-community
+langchain-huggingface
+langchain-text-splitters
 fastapi
 uvicorn
 langgraph
-qdrant-client
+faiss-cpu
+sentence-transformers
 yfinance
 playwright
 pandas
@@ -13,4 +15,4 @@ numpy
 python-dotenv
 duckduckgo-search
 beautifulsoup4
-sqlite3-api
+pypdf

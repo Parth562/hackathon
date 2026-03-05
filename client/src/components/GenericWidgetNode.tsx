@@ -12,11 +12,11 @@ import CustomWidget from './CustomWidget';
 // Wrapper component that renders the specific widget based on type
 const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean }) => {
     const { widgetData, onRemove } = data;
-    
+
     // We lift the border/selection state to this wrapper so the inner widgets don't need to know about reactflow
     // But we need to handle the resize logic. ReactFlow's NodeResizer handles the interaction, 
     // we just need to make sure our widget fills the space.
-    
+
     const widgetType = widgetData.widget_type || widgetData.type || widgetData.chart_type;
 
     let content = null;
@@ -24,8 +24,8 @@ const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean })
     // Remove logic is passed down, but the node itself is removed via onNodesChange in the parent
     // The "onClose" prop in our widgets usually triggers onRemoveWidget.
     // We need to bridge this: specific widget calls onClose -> parent removes node.
-    const handleClose = (e: React.MouseEvent) => {
-        e.stopPropagation(); // prevent node selection when clicking close
+    const handleClose = (e?: React.MouseEvent) => {
+        if (e) e.stopPropagation(); // prevent node selection when clicking close
         if (onRemove) onRemove();
     };
 
@@ -44,7 +44,7 @@ const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean })
     } else {
         const title = widgetType ? widgetType.replace('_', ' ') : 'Structured Analysis';
         content = (
-             <div className="glass-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            <div className="glass-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
                 <button
                     onClick={handleClose}
                     style={{ position: 'absolute', top: '12px', right: '16px', background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '18px', zIndex: 100 }}
@@ -63,20 +63,29 @@ const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean })
 
     return (
         <div style={{ height: '100%', width: '100%' }}>
-            <NodeResizer 
-                isVisible={selected} 
-                minWidth={300} 
+            <NodeResizer
+                isVisible={selected}
+                minWidth={300}
                 minHeight={200}
                 handleStyle={{ width: 10, height: 10, borderRadius: 5, background: 'var(--accent)', border: '2px solid #fff' }}
                 lineStyle={{ border: '2px dashed var(--accent)' }}
             />
-            
+
             <div style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
                 {content}
             </div>
-            {/* Hidden handles for ReactFlow validity */}
-            <Handle type="target" position={Position.Top} style={{ opacity: 0, pointerEvents: 'none' }} />
-            <Handle type="source" position={Position.Bottom} style={{ opacity: 0, pointerEvents: 'none' }} />
+            <Handle
+                type="target"
+                position={Position.Left}
+                id="target-handle"
+                style={{ width: '8px', height: '40px', background: 'var(--primary)', borderRadius: '4px', border: '2px solid rgba(255,255,255,0.4)', left: '-4px' }}
+            />
+            <Handle
+                type="source"
+                position={Position.Right}
+                id="source-handle"
+                style={{ width: '8px', height: '40px', background: 'var(--accent)', borderRadius: '4px', border: '2px solid rgba(255,255,255,0.4)', right: '-4px' }}
+            />
         </div>
     );
 };

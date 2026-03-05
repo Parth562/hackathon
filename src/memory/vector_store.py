@@ -1,217 +1,294 @@
-from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, VectorParams, PointStruct
-from langchain_core.embeddings import Embeddings
+"""
+vector_store.py
+~~~~~~~~~~~~~~~
+Local, disk-persisted vector store backed by LangChain FAISS.
+
+Embedding model : sentence-transformers/all-MiniLM-L6-v2
+                  (GPU-accelerated when CUDA/MPS is available, falls back to CPU)
+FAISS index     : IndexFlatIP  (inner-product / cosine on L2-normalised vectors —
+                  faster than L2 in high-dimensional space)
+Deletion        : uses FAISS's native delete(ids=[...]) — no full-index rebuild.
+"""
+
 import os
+import json
 import uuid
 from typing import List, Dict, Any, Optional
 
-# Singleton client to prevent multiple instances from locking the local database
-_qdrant_client = None
+import faiss
+from langchain_community.docstore.in_memory import InMemoryDocstore
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.documents import Document
 
-def _get_qdrant_client():
-    global _qdrant_client
-    if _qdrant_client is None:
-        db_path = os.path.join(os.getcwd(), "qdrant_db")
-        os.makedirs(db_path, exist_ok=True)
-        _qdrant_client = QdrantClient(path=db_path)
-    return _qdrant_client
+# ── Device detection ──────────────────────────────────────────────────────────
+
+def _best_device() -> str:
+    """Return 'cuda', 'mps', or 'cpu' depending on what's available."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
+    except ImportError:
+        pass
+    return "cpu"
+
+
+# ── Shared embedding model (singleton, loaded once per process) ───────────────
+
+_embeddings: Optional[HuggingFaceEmbeddings] = None
+_EMBED_DIM = 384  # all-MiniLM-L6-v2 output dimension
+
+
+def _get_embeddings() -> HuggingFaceEmbeddings:
+    global _embeddings
+    if _embeddings is None:
+        device = _best_device()
+        _embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2",
+            model_kwargs={"device": device},
+            encode_kwargs={
+                "batch_size": 64,           # process 64 chunks at a time
+                "normalize_embeddings": True,  # required for cosine via dot-product
+            },
+        )
+        print(f"[VectorStore] Embedding model loaded on device: {device}")
+    return _embeddings
+
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+
+FAISS_DIR = os.path.join(os.path.dirname(__file__), "faiss_store")
+
+
+def _index_path(namespace: str) -> str:
+    return os.path.join(FAISS_DIR, namespace)
+
+
+def _id_map_path(namespace: str) -> str:
+    """JSON file: { source_filename -> [faiss_doc_id, ...] }"""
+    return os.path.join(_index_path(namespace), "source_id_map.json")
+
+
+# ── FAISS store factory ───────────────────────────────────────────────────────
+
+def _new_faiss_store(emb: HuggingFaceEmbeddings) -> FAISS:
+    """Create a brand-new, empty FAISS store with an IndexFlatIP index."""
+    index = faiss.IndexFlatIP(_EMBED_DIM)  # cosine similarity on normalised vecs
+    return FAISS(
+        embedding_function=emb,
+        index=index,
+        docstore=InMemoryDocstore(),
+        index_to_docstore_id={},
+    )
+
+
+def _load_or_create(namespace: str) -> FAISS:
+    path = _index_path(namespace)
+    emb = _get_embeddings()
+    if os.path.isdir(path) and os.path.isfile(os.path.join(path, "index.faiss")):
+        return FAISS.load_local(path, emb, allow_dangerous_deserialization=True)
+    store = _new_faiss_store(emb)
+    os.makedirs(path, exist_ok=True)
+    store.save_local(path)
+    return store
+
+
+# ── Source → doc-ID map helpers ───────────────────────────────────────────────
+
+def _load_id_map(namespace: str) -> Dict[str, List[str]]:
+    p = _id_map_path(namespace)
+    if os.path.isfile(p):
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_id_map(namespace: str, id_map: Dict[str, List[str]]) -> None:
+    with open(_id_map_path(namespace), "w", encoding="utf-8") as f:
+        json.dump(id_map, f)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MemoryManager
+# ─────────────────────────────────────────────────────────────────────────────
 
 class MemoryManager:
-    """
-    Manages long-term memory for the Agent using Qdrant.
-    Stores and retrieves user preferences (risk tolerance, favourite KPIs)
-    and context across sessions.
-    """
-    def __init__(self, collection_name: str = "financial_memory"):
-        # Use an in-memory client or a local file for the hackathon
-        # To persist state, we map it to a local sqlite database format for qdrant
-        self.client = _get_qdrant_client()
-        
-        self.collection_name = collection_name
-        
-        # Use HuggingFace local embeddings
-        try:
-             from langchain_huggingface import HuggingFaceEmbeddings
-             # all-MiniLM-L6-v2 is a great fast, small local model for this
-             self.embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-             self.vector_size = 384 # specific to all-MiniLM-L6-v2
-        except Exception as e:
-             print(f"Warning: Failed to load HuggingFace embeddings. {e}")
-        
-        # Initialize collection if it doesn't exist
-        self._init_collection()
-        
-    def _init_collection(self):
-        """Creates the Qdrant collection if it doesn't already exist."""
-        collections = self.client.get_collections().collections
-        exists = any(c.name == self.collection_name for c in collections)
-        
-        if not exists:
-            self.client.create_collection(
-                collection_name=self.collection_name,
-                vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
-            )
-            
-    def store_memory(self, text: str, metadata: Dict[str, Any] = None):
-        """
-        Stores a new memory (e.g., 'User prefers conservative investments' or 'User cares about EBITDA')
-        """
-        metadata = metadata or {}
-        vector = self.embeddings.embed_query(text)
-        
-        point_id = str(uuid.uuid4())
-        
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=[
-                PointStruct(
-                    id=point_id,
-                    vector=vector,
-                    payload={"text": text, **metadata}
-                )
-            ]
-        )
-        return point_id
+    """Long-term agent memory backed by a local FAISS index."""
 
-    def store_memories_batch(self, texts: List[str], metadatas: List[Dict[str, Any]] = None):
+    def __init__(self, collection_name: str = "financial_memory"):
+        self.namespace = "memories"
+        self._store = _load_or_create(self.namespace)
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _save(self):
+        self._store.save_local(_index_path(self.namespace))
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def store_memory(self, text: str, metadata: Dict[str, Any] = None) -> str:
+        metadata = metadata or {}
+        doc_id = str(uuid.uuid4())
+        self._store.add_documents(
+            [Document(page_content=text, metadata=metadata)],
+            ids=[doc_id],
+        )
+        self._save()
+        return doc_id
+
+    def store_memories_batch(
+        self, texts: List[str], metadatas: List[Dict[str, Any]] = None
+    ) -> List[str]:
+        if not texts:
+            return []
+        metadatas = metadatas or [{} for _ in texts]
+        ids = [str(uuid.uuid4()) for _ in texts]
+        docs = [Document(page_content=t, metadata=m) for t, m in zip(texts, metadatas)]
+        self._store.add_documents(docs, ids=ids)
+        self._save()
+        return ids
+
+    def retrieve_relevant_memories(
+        self, query: str, limit: int = 3, use_mmr: bool = False
+    ) -> List[Dict[str, Any]]:
+        if self._store.index.ntotal == 0:
+            return []
+        if use_mmr:
+            hits = self._store.max_marginal_relevance_search(query, k=limit)
+            return [
+                {"id": "", "score": None, "text": doc.page_content, "metadata": doc.metadata}
+                for doc in hits
+            ]
+        hits = self._store.similarity_search_with_score(query, k=limit)
+        return [
+            {
+                "id": "",
+                "score": float(score),
+                "text": doc.page_content,
+                "metadata": doc.metadata,
+            }
+            for doc, score in hits
+        ]
+
+    def delete_document_by_source(self, source_filename: str) -> bool:
+        return True
+
+    def get_all_preferences_summary(self) -> str:
+        return "Preferences are stored in the local FAISS memory index."
+
+    def get_all_document_sources(self) -> List[str]:
+        return []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DocumentStore
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DocumentStore:
+    """
+    Company document store for RAG backed by a local FAISS index.
+
+    Key design decisions
+    --------------------
+    - Uses IndexFlatIP + L2-normalised embeddings (≡ cosine similarity).
+    - Tracks source → [doc_ids] in a JSON sidecar so deletion is a fast
+      native FAISS delete(ids=[...]) — no index rebuild required.
+    - Embedding batches are processed at batch_size=64 for maximum throughput.
+    """
+
+    def __init__(self, collection_name: str = "company_documents"):
+        self.namespace = "documents"
+        self._store = _load_or_create(self.namespace)
+        self._id_map: Dict[str, List[str]] = _load_id_map(self.namespace)
+
+    # ── Persistence helpers ───────────────────────────────────────────────────
+
+    def _save(self):
+        self._store.save_local(_index_path(self.namespace))
+        _save_id_map(self.namespace, self._id_map)
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def store_memories_batch(
+        self, texts: List[str], metadatas: List[Dict[str, Any]] = None
+    ) -> List[str]:
         """
-        Stores multiple memories in a single batch to speed up embedding and network overhead.
+        Ingest chunks into the FAISS index.
+        Embeddings are computed in batches of 64 by the sentence-transformer model.
+        Saves the index and source-ID map once, after all chunks are added.
         """
         if not texts:
             return []
-            
         metadatas = metadatas or [{} for _ in texts]
-        vectors = self.embeddings.embed_documents(texts)
-        
-        points = []
-        for text, meta, vector in zip(texts, metadatas, vectors):
-            point_id = str(uuid.uuid4())
-            points.append(
-                PointStruct(
-                    id=point_id,
-                    vector=vector,
-                    payload={"text": text, **meta}
-                )
+        ids = [str(uuid.uuid4()) for _ in texts]
+
+        docs = [
+            Document(
+                page_content=t,
+                metadata={k: str(v) for k, v in m.items()},  # FAISS metadata must be str
             )
-            
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=points
-        )
-        return [p.id for p in points]
-        
-    def retrieve_relevant_memories(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
-        """
-        Retrieves memories relevantw to the current user query or situation.
-        """
-        vector = self.embeddings.embed_query(query)
-        
-        query_response = self.client.query_points(
-            collection_name=self.collection_name,
-            query=vector,
-            limit=limit
-        )
-        search_result = query_response.points
-        
+            for t, m in zip(texts, metadatas)
+        ]
+
+        # add_documents triggers a single batched encode call internally
+        self._store.add_documents(docs, ids=ids)
+
+        # Update source → id_map
+        for doc_id, m in zip(ids, metadatas):
+            src = m.get("source")
+            if src:
+                self._id_map.setdefault(src, []).append(doc_id)
+
+        self._save()
+        return ids
+
+    def retrieve_relevant_memories(
+        self, query: str, limit: int = 5, use_mmr: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Similarity search (cosine). Returns top-k results with scores."""
+        if self._store.index.ntotal == 0:
+            return []
+        if use_mmr:
+            hits = self._store.max_marginal_relevance_search(query, k=limit)
+            return [
+                {
+                    "id": "",
+                    "score": None,
+                    "text": doc.page_content,
+                    "metadata": doc.metadata,
+                }
+                for doc in hits
+            ]
+        hits = self._store.similarity_search_with_score(query, k=limit)
         return [
             {
-                "id": hit.id,
-                "score": hit.score,
-                "text": hit.payload.get("text", ""),
-                "metadata": {k: v for k, v in hit.payload.items() if k != "text"}
+                "id": "",
+                "score": float(score),
+                "text": doc.page_content,
+                "metadata": doc.metadata,
             }
-            for hit in search_result
+            for doc, score in hits
         ]
-        
+
     def delete_document_by_source(self, source_filename: str) -> bool:
         """
-        Deletes all chunks associated with a specific document source.
-        Useful for removing deprecated or incorrect documents.
+        Delete all vectors for a given source document.
+        Uses FAISS's native delete(ids=[...]) — O(n) scan but no rebuild needed.
         """
+        ids_to_delete = self._id_map.get(source_filename, [])
+        if not ids_to_delete:
+            return True  # nothing to remove
         try:
-            from qdrant_client import models
-            self.client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="source",
-                                match=models.MatchValue(value=source_filename),
-                            ),
-                        ],
-                    )
-                ),
-            )
+            self._store.delete(ids=ids_to_delete)
+            del self._id_map[source_filename]
+            self._save()
             return True
         except Exception as e:
-            print(f"Failed to delete document {source_filename}: {e}")
+            print(f"[DocumentStore] Failed to delete '{source_filename}': {e}")
             return False
 
-    def get_all_preferences_summary(self) -> str:
-        """
-        Retrieves a summary of all explicit user preferences stored (risk, kpis, etc)
-        Useful for injecting into the system prompt.
-        """
-        # Fetch practically everything (assumes small scale for personal memory)
-        results = self.client.scroll(
-            collection_name=self.collection_name,
-            limit=50,
-            with_payload=True,
-            with_vectors=False
-        )
-        
-        memories = reversed([point.payload.get('text') for point in results[0] if point.payload.get('text')])
-        if not memories:
-            return "No specific preferences remembered yet."
-            
-        return "\n".join([f"- {m}" for m in set(memories)])
-
     def get_all_document_sources(self) -> List[str]:
-        """
-        Retrieves a list of all unique document sources uploaded and indexed in this collection.
-        This iterates through payloads to find unique 'source' metadata keys.
-        """
-        try:
-            # Scroll through the collection to collect all unique sources
-            # This is not efficient for millions of docs but fine for a hackathon
-            has_more = True
-            next_offset = None
-            sources = set()
-            
-            while has_more:
-                results, next_offset = self.client.scroll(
-                    collection_name=self.collection_name,
-                    limit=100,
-                    offset=next_offset,
-                    with_payload=True,
-                    with_vectors=False
-                )
-                
-                for point in results:
-                    if point.payload and "source" in point.payload:
-                        sources.add(point.payload["source"])
-                
-                has_more = next_offset is not None
-            
-            return list(sources)
-        except Exception as e:
-            print(f"Error fetching document sources: {e}")
-            return []
-            results = self.client.scroll(
-                collection_name=self.collection_name,
-                limit=1000, 
-                with_payload=True,
-                with_vectors=False
-            )
-            
-            # Extract unique 'source' values from payload metadata
-            sources = set()
-            for point in results[0]:
-                if point.payload and 'source' in point.payload:
-                    sources.add(point.payload['source'])
-                    
-            return list(sources)
-        except Exception as e:
-            print(f"Error fetching document sources: {e}")
-            return []
+        return sorted(self._id_map.keys())

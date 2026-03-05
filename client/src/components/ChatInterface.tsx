@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, Paperclip } from 'lucide-react';
+import { Send, Loader2, Paperclip, StopCircle, Layers } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 interface Message {
     id: string;
     role: 'user' | 'agent';
     content: string;
+    status?: 'queued' | 'processing' | 'stopped' | 'completed';
 }
 
 interface ChatInterfaceProps {
@@ -18,6 +19,20 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    const [queue, setQueue] = useState<string[]>([]);
+    const abortControllerRef = useRef<AbortController | null>(null);
+
+    // Queue processor
+    useEffect(() => {
+        const processQueue = async () => {
+            if (!loading && queue.length > 0) {
+                const nextQuery = queue[0];
+                setQueue(prev => prev.slice(1));
+                await processQuery(nextQuery);
+            }
+        };
+        processQueue();
+    }, [queue, loading]);
     const [sessionId, setSessionId] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -113,21 +128,55 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
         fetchDocuments();
     }, []);
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || loading) return;
+        const userInput = input.trim();
+        if (!userInput) return;
 
-        const userMessage = input.trim();
+        if (loading) {
+            setQueue(prev => [...prev, userInput]);
+            setInput('');
+            // Optionally show user their message is queued
+            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: userInput, status: 'queued' }]);
+            return;
+        }
+
+        processQuery(userInput);
+    };
+
+    const handleStop = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+            setLoading(false);
+            setStatusMessage("Stopped by user");
+            setMessages(prev => {
+                const newMsgs = [...prev];
+                if (newMsgs.length > 0 && newMsgs[newMsgs.length - 1].role === 'agent') {
+                    newMsgs[newMsgs.length - 1].content += "\n\n*[Stopped]*";
+                }
+                return newMsgs;
+            });
+        }
+    };
+
+    const processQuery = async (query: string) => {
         setInput('');
 
-        // Add user message to UI
-        const newMsgId = Date.now().toString();
-        setMessages(prev => [...prev, { id: newMsgId, role: 'user', content: userMessage }]);
+        // Find if message already exists (from queue UI) or add it
+        setMessages(prev => {
+            if (prev.some(m => m.content === query && m.status === 'queued')) {
+                return prev.map(m => m.content === query && m.status === 'queued' ? { ...m, status: 'processing' as const, role: 'user' as const } : m);
+            }
+            return [...prev, { id: Date.now().toString(), role: 'user', content: query, status: 'processing' }];
+        });
+
         setLoading(true);
         setStatusMessage("Starting agent...");
+        abortControllerRef.current = new AbortController();
 
         try {
-            const payload: any = { message: userMessage };
+            const payload: any = { message: query };
             if (sessionId) payload.session_id = sessionId;
             if (selectedModel) {
                 payload.model_name = selectedModel.id;
@@ -137,14 +186,15 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
             const response = await fetch('http://localhost:8261/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: abortControllerRef.current.signal
             });
 
             if (!response.ok) throw new Error('Network response was not ok');
-            
+
             const reader = response.body?.getReader();
             const decoder = new TextDecoder();
-            
+
             if (!reader) throw new Error("No reader available");
 
             let finalContent = "";
@@ -153,20 +203,37 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                
+
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
-                
+
                 // Process all complete lines
                 buffer = lines.pop() || ""; // Keep the last incomplete line in buffer
-                
+
                 for (const line of lines) {
                     if (!line.trim()) continue;
                     try {
                         const data = JSON.parse(line);
-                        
+
                         if (data.type === 'status') {
                             setStatusMessage(data.content);
+                        } else if (data.type === 'token') {
+                            finalContent += data.content;
+                            // Progressively update UI
+                            setMessages(prev => {
+                                const newMsgs = [...prev];
+                                const last = newMsgs[newMsgs.length - 1];
+                                if (last && last.role === 'agent') {
+                                    last.content = finalContent;
+                                } else {
+                                    newMsgs.push({
+                                        id: Date.now().toString(),
+                                        role: 'agent',
+                                        content: finalContent
+                                    });
+                                }
+                                return newMsgs;
+                            });
                         } else if (data.type === 'result') {
                             finalContent = data.response;
                             if (data.session_id) setSessionId(data.session_id);
@@ -175,14 +242,14 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                             finalContent = "⚠️ Error: " + data.content;
                         }
                     } catch (e) {
-                         console.error("Error parsing JSON line", e);
+                        console.error("Error parsing JSON line", e);
                     }
                 }
             }
 
             // Parse finalContent for widgets (same logic as before)
             const rawContent = finalContent;
-            
+
             // Look for ```widget blocks
             const widgetRegex = /```widget\n([\s\S]*?)```/g;
             let match;
@@ -199,21 +266,35 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
             // Clean up response string by removing the raw JSON blocks from UI
             finalContent = finalContent.replace(widgetRegex, '[Interactive Widget added to Board]');
 
-            setMessages(prev => [...prev, {
-                id: (Date.now() + 1).toString(),
-                role: 'agent',
-                content: finalContent
-            }]);
+            setMessages(prev => {
+                const newMsgs = [...prev];
+                const last = newMsgs[newMsgs.length - 1];
+                if (last && last.role === 'agent') {
+                    last.content = finalContent;
+                } else {
+                    newMsgs.push({
+                        id: (Date.now() + 1).toString(),
+                        role: 'agent',
+                        content: finalContent
+                    });
+                }
+                return newMsgs;
+            });
 
-        } catch (error) {
-            console.error(error);
-            setMessages(prev => [...prev, {
-                id: (Date.now() + 1).toString(),
-                role: 'agent',
-                content: 'Error: Failed to connect to backend server. Please make sure the FastAPI server is running.'
-            }]);
+        } catch (error: any) {
+            if (error.name === 'AbortError') {
+                console.log('Request aborted');
+            } else {
+                console.error(error);
+                setMessages(prev => [...prev, {
+                    id: (Date.now() + 1).toString(),
+                    role: 'agent',
+                    content: 'Error: Failed to connect to backend server. Please make sure the FastAPI server is running.'
+                }]);
+            }
         } finally {
             setLoading(false);
+            abortControllerRef.current = null;
         }
     };
 
@@ -221,11 +302,11 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
     const [searchQuery, setSearchQuery] = useState('');
 
     const handleDeleteDoc = async (docName: string) => {
-         if (!confirm(`Are you sure you want to delete ${docName}?`)) return;
-         try {
-             await fetch(`http://localhost:8261/api/documents/${docName}`, { method: 'DELETE' });
-             setUploadedDocs(prev => prev.filter(d => d !== docName));
-         } catch (e) { console.error(e); }
+        if (!confirm(`Are you sure you want to delete ${docName}?`)) return;
+        try {
+            await fetch(`http://localhost:8261/api/documents/${docName}`, { method: 'DELETE' });
+            setUploadedDocs(prev => prev.filter(d => d !== docName));
+        } catch (e) { console.error(e); }
     };
 
     const handleManualSearch = async () => {
@@ -239,16 +320,16 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                 body: JSON.stringify({ query: searchQuery, limit: 3 })
             });
             const data = await res.json();
-            
+
             // Inject results into chat
-            const resultsFormatted = data.results.map((r: any, i: number) => 
-                `**Result ${i+1}** (${r.source}, Score: ${(r.score*100).toFixed(0)}%)\n> "${r.text.substring(0, 200)}..."`
+            const resultsFormatted = data.results.map((r: any, i: number) =>
+                `**Result ${i + 1}** (${r.source}, Score: ${(r.score * 100).toFixed(0)}%)\n> "${r.text.substring(0, 200)}..."`
             ).join('\n\n');
-            
+
             setMessages(prev => [
                 ...prev,
                 { id: Date.now().toString(), role: 'user', content: `Search for: "${searchQuery}"` },
-                { id: (Date.now()+1).toString(), role: 'agent', content: resultsFormatted ? `Found these matches:\n\n${resultsFormatted}` : "No matches found." }
+                { id: (Date.now() + 1).toString(), role: 'agent', content: resultsFormatted ? `Found these matches:\n\n${resultsFormatted}` : "No matches found." }
             ]);
             setActiveTab('chat');
             setSearchQuery('');
@@ -264,7 +345,7 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
             {/* Header Area */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '16px' }}>
                 <h2 className="title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    Financial Analyst AI
+                    KENT
                 </h2>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -359,28 +440,28 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                         </div>
 
                         <div className="search-bar" style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
-                            <input 
-                                type="text" 
-                                placeholder="Search all documents..." 
+                            <input
+                                type="text"
+                                placeholder="Search all documents..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
-                                style={{ 
-                                    flex: 1, 
-                                    padding: '8px 12px', 
-                                    borderRadius: '8px', 
-                                    border: '1px solid var(--panel-border)', 
-                                    background: 'rgba(0,0,0,0.2)', 
-                                    color: '#fff' 
+                                style={{
+                                    flex: 1,
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--panel-border)',
+                                    background: 'rgba(0,0,0,0.2)',
+                                    color: '#fff'
                                 }}
                                 onKeyDown={(e) => e.key === 'Enter' && handleManualSearch()}
                             />
-                            <button 
+                            <button
                                 onClick={handleManualSearch}
-                                style={{ 
-                                    padding: '8px 12px', 
-                                    borderRadius: '8px', 
-                                    border: '1px solid var(--panel-border)', 
-                                    background: 'var(--primary)', 
+                                style={{
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid var(--panel-border)',
+                                    background: 'var(--primary)',
                                     color: '#fff',
                                     cursor: 'pointer'
                                 }}
@@ -407,12 +488,12 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                                     }}>
                                         <Paperclip size={18} style={{ color: 'var(--primary)' }} />
                                         <div style={{ flex: 1, fontSize: '0.9rem', color: 'var(--foreground)' }}>{doc}</div>
-                                        <button 
+                                        <button
                                             onClick={() => handleDeleteDoc(doc)}
-                                            style={{ 
-                                                background: 'none', 
-                                                border: 'none', 
-                                                color: '#f85149', 
+                                            style={{
+                                                background: 'none',
+                                                border: 'none',
+                                                color: '#f85149',
                                                 cursor: 'pointer',
                                                 padding: '4px',
                                                 borderRadius: '4px',
@@ -462,6 +543,15 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                                 )}
                             </div>
                         ))}
+
+                        {/* Queue Indicator */}
+                        {queue.length > 0 && (
+                            <div style={{ alignSelf: 'center', margin: '8px 0', padding: '8px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '20px', fontSize: '0.8rem', color: 'var(--secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Layers size={14} />
+                                {queue.length} queries queued
+                            </div>
+                        )}
+
                         {loading && (
                             <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', color: 'var(--accent)' }}>
                                 <Loader2 className="animate-spin" size={18} />
@@ -483,7 +573,7 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                             type="button"
                             className="button"
                             onClick={() => fileInputRef.current?.click()}
-                            disabled={loading || uploading}
+                            disabled={uploading}
                             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--foreground)' }}
                             title="Upload Company Document"
                         >
@@ -493,13 +583,24 @@ export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
                             type="text"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
-                            placeholder="e.g., Draw an advanced stock graph of AAPL for the last 6 months..."
+                            placeholder={loading ? "Type to queue query..." : "e.g., Draw an advanced stock graph of AAPL for the last 6 months..."}
                             className="input"
-                            disabled={loading}
                         />
-                        <button type="submit" className="button" disabled={loading} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px' }}>
-                            <Send size={18} />
-                        </button>
+                        {loading ? (
+                            <button
+                                type="button"
+                                className="button"
+                                onClick={handleStop}
+                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', background: '#f85149', borderColor: '#da3633' }}
+                                title="Stop Generation"
+                            >
+                                <StopCircle size={18} />
+                            </button>
+                        ) : (
+                            <button type="submit" className="button" disabled={!input.trim()} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px' }}>
+                                <Send size={18} />
+                            </button>
+                        )}
                     </form>
                 </>
             )}
