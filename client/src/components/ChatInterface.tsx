@@ -1,609 +1,643 @@
 "use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2, Paperclip, StopCircle, Layers } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { Send, Paperclip, StopCircle, Layers, Library, MessageSquare, Search, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Button, Spinner } from "./ui/Button";
+import { Input } from "./ui/Input";
+import { Badge, StatusDot } from "./ui/Badge";
+import { ModeToggle, type ResearchMode } from "./ui/ModeToggle";
+import { Select } from "./ui/Select";
+import { Divider, EmptyState } from "./ui/Divider";
+import { fetchModels, fetchDocuments, uploadDocument, deleteDocument, searchDocuments, streamChat } from "@/lib/api";
+import { StreamEventSchema, type Model } from "@/lib/schemas";
 
+// ── Types ─────────────────────────────────────────────
 interface Message {
     id: string;
-    role: 'user' | 'agent';
+    role: "user" | "agent";
     content: string;
-    status?: 'queued' | 'processing' | 'stopped' | 'completed';
+    status?: "queued" | "processing" | "stopped" | "completed";
 }
 
-interface ChatInterfaceProps {
-    onNewWidget: (widgetData: any) => void;
+interface Props {
+    onNewWidget: (data: any) => void;
+    sessionId: string | null;
+    onSessionCreated: (id: string) => void;
+    restoredMessages?: { role: string; content: string }[] | null;
 }
 
-export default function ChatInterface({ onNewWidget }: ChatInterfaceProps) {
+const PREF_MODEL_KEY = "KEN_model_pref";
+const PREF_MODE_KEY = "KEN_mode_pref";
+
+// ── ChatInterface ─────────────────────────────────────
+export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated, restoredMessages }: Props) {
     const [messages, setMessages] = useState<Message[]>([]);
-    const [input, setInput] = useState('');
+    const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [queue, setQueue] = useState<string[]>([]);
-    const abortControllerRef = useRef<AbortController | null>(null);
+    const [statusMsg, setStatusMsg] = useState("Thinking...");
+    const [activeTab, setActiveTab] = useState<"chat" | "library">("chat");
+    const [mode, setMode] = useState<ResearchMode>(() => {
+        if (typeof window !== "undefined") return (localStorage.getItem(PREF_MODE_KEY) as ResearchMode) ?? "QUICK";
+        return "QUICK";
+    });
+    const [models, setModels] = useState<Model[]>([]);
+    const [selectedModelId, setSelectedModelId] = useState<string>(() => {
+        if (typeof window !== "undefined") return localStorage.getItem(PREF_MODEL_KEY) ?? "glm-5:cloud";
+        return "glm-5:cloud";
+    });
+    const [uploadedDocs, setUploadedDocs] = useState<string[]>([]);
+    const [uploading, setUploading] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [searching, setSearching] = useState(false);
+    const [showControls, setShowControls] = useState(false);
+
+    const abortRef = useRef<AbortController | null>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // ── Init ────────────────────────────────────────────
+    useEffect(() => {
+        fetchModels().then(setModels).catch(() => { });
+        fetchDocuments().then(setUploadedDocs).catch(() => { });
+    }, []);
+
+    // Track prev sessionId so we can distinguish:
+    //   null → newId  = session just created mid-stream → do NOT clear messages
+    //   oldId → newId = explicit session switch         → DO clear messages
+    //   anything → null = New Chat pressed              → DO clear messages
+    const prevSessionIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        const prev = prevSessionIdRef.current;
+        const explicitSwitch = sessionId === null || (prev !== null && prev !== sessionId);
+        if (explicitSwitch) setMessages([]);
+        prevSessionIdRef.current = sessionId;
+    }, [sessionId]);
+
+    // Persist preferences
+    useEffect(() => { localStorage.setItem(PREF_MODE_KEY, mode); }, [mode]);
+    useEffect(() => { localStorage.setItem(PREF_MODEL_KEY, selectedModelId); }, [selectedModelId]);
+
+    useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+    // Restore messages when a session is loaded from the sidebar
+    useEffect(() => {
+        if (!restoredMessages) return; // null = no restore needed (new chat or mid-stream)
+        const converted = restoredMessages.map((m, i) => ({
+            id: `restored-${i}`,
+            role: m.role as "user" | "agent",
+            content: m.content,
+        }));
+        setMessages(converted);
+    }, [restoredMessages]);
 
     // Queue processor
     useEffect(() => {
-        const processQueue = async () => {
-            if (!loading && queue.length > 0) {
-                const nextQuery = queue[0];
-                setQueue(prev => prev.slice(1));
-                await processQuery(nextQuery);
-            }
-        };
-        processQueue();
+        if (!loading && queue.length > 0) {
+            const next = queue[0];
+            setQueue((q) => q.slice(1));
+            processQuery(next);
+        }
     }, [queue, loading]);
-    const [sessionId, setSessionId] = useState<string | null>(null);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-    const [availableModels, setAvailableModels] = useState<any[]>([]);
-    const [selectedModel, setSelectedModel] = useState<any>(null);
-    const [uploading, setUploading] = useState(false);
-    const [uploadedDocs, setUploadedDocs] = useState<string[]>([]);
-    const [statusMessage, setStatusMessage] = useState<string>("Thinking...");
 
+    // ── Helpers ─────────────────────────────────────────
+    const selectedModel = models.find((m) => m.id === selectedModelId);
+
+    const currentProvider: string = selectedModel?.provider ?? "google";
+
+    const addMessage = (msg: Omit<Message, "id">) =>
+        setMessages((prev) => [...prev, { id: Date.now().toString() + Math.random(), ...msg }]);
+
+    const updateLastAgent = (updater: (content: string) => string) =>
+        setMessages((prev) => {
+            const msgs = [...prev];
+            const idx = msgs.map((m) => m.role).lastIndexOf("agent");
+            if (idx >= 0) msgs[idx] = { ...msgs[idx], content: updater(msgs[idx].content) };
+            return msgs;
+        });
+
+    // ── File upload ──────────────────────────────────────
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
-
         setUploading(true);
-        const formData = new FormData();
-        formData.append('file', file);
-
         try {
-            const res = await fetch('http://localhost:8261/api/upload', {
-                method: 'POST',
-                body: formData,
-            });
-
-            if (!res.ok) throw new Error('Failed to upload file');
-
-            const data = await res.json();
-
-            setUploadedDocs(prev => {
-                if (!prev.includes(file.name)) {
-                    return [...prev, file.name];
-                }
-                return prev;
-            });
-
-            // Add system message to UI confirming upload
-            setMessages(prev => [...prev, {
-                id: Date.now().toString(),
-                role: 'agent',
-                content: `✅ Successfully uploaded and processed document: **${file.name}**. You can now ask me questions about it!`
-            }]);
-        } catch (error) {
-            console.error('Error uploading file:', error);
-            setMessages(prev => [...prev, {
-                id: Date.now().toString(),
-                role: 'agent',
-                content: `❌ Error uploading ${file.name}. Please ensure the backend is running.`
-            }]);
+            await uploadDocument(file);
+            setUploadedDocs((prev) => prev.includes(file.name) ? prev : [...prev, file.name]);
+            addMessage({ role: "agent", content: `✅ **${file.name}** uploaded and indexed. Ask me anything about it!` });
+        } catch {
+            addMessage({ role: "agent", content: `❌ Failed to upload **${file.name}**. Is the backend running?` });
         } finally {
             setUploading(false);
-            if (fileInputRef.current) {
-                fileInputRef.current.value = '';
-            }
+            if (fileInputRef.current) fileInputRef.current.value = "";
         }
     };
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const handleDeleteDoc = async (name: string) => {
+        if (!confirm(`Delete "${name}"?`)) return;
+        await deleteDocument(name).catch(() => { });
+        setUploadedDocs((prev) => prev.filter((d) => d !== name));
     };
 
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
+    const handleSearch = async () => {
+        if (!searchQuery.trim()) return;
+        setSearching(true);
+        try {
+            const results = await searchDocuments(searchQuery, 3);
+            const formatted = results.map((r, i) =>
+                `**Result ${i + 1}** — *${r.source}* (score: ${((r.score ?? 0) * 100).toFixed(0)}%)\n> "${r.text.substring(0, 220)}..."`
+            ).join("\n\n");
+            addMessage({ role: "user", content: `Search: "${searchQuery}"` });
+            addMessage({ role: "agent", content: formatted || "No matches found in indexed documents." });
+            setActiveTab("chat");
+            setSearchQuery("");
+        } finally { setSearching(false); }
+    };
 
-    useEffect(() => {
-        const fetchModels = async () => {
-            try {
-                const res = await fetch('http://localhost:8261/api/models');
-                if (res.ok) {
-                    const data = await res.json();
-                    setAvailableModels(data.models || []);
-                    if (data.models && data.models.length > 0) {
-                        setSelectedModel(data.models[0]); // Default to Gemini
-                    }
-                }
-            } catch (error) {
-                console.error("Failed to fetch models:", error);
-            }
-        };
-
-        const fetchDocuments = async () => {
-            try {
-                const res = await fetch('http://localhost:8261/api/documents');
-                if (res.ok) {
-                    const data = await res.json();
-                    setUploadedDocs(data.documents || []);
-                }
-            } catch (error) {
-                console.error("Failed to fetch documents:", error);
-            }
-        };
-
-        fetchModels();
-        fetchDocuments();
-    }, []);
-
+    // ── Chat ─────────────────────────────────────────────
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        const userInput = input.trim();
-        if (!userInput) return;
-
+        const text = input.trim();
+        if (!text) return;
+        setInput("");
         if (loading) {
-            setQueue(prev => [...prev, userInput]);
-            setInput('');
-            // Optionally show user their message is queued
-            setMessages(prev => [...prev, { id: Date.now().toString(), role: 'user', content: userInput, status: 'queued' }]);
+            setQueue((q) => [...q, text]);
+            addMessage({ role: "user", content: text, status: "queued" });
             return;
         }
-
-        processQuery(userInput);
+        processQuery(text);
     };
 
     const handleStop = () => {
-        if (abortControllerRef.current) {
-            abortControllerRef.current.abort();
-            abortControllerRef.current = null;
-            setLoading(false);
-            setStatusMessage("Stopped by user");
-            setMessages(prev => {
-                const newMsgs = [...prev];
-                if (newMsgs.length > 0 && newMsgs[newMsgs.length - 1].role === 'agent') {
-                    newMsgs[newMsgs.length - 1].content += "\n\n*[Stopped]*";
-                }
-                return newMsgs;
-            });
-        }
+        abortRef.current?.abort();
+        abortRef.current = null;
+        setLoading(false);
+        updateLastAgent((c) => c + "\n\n*[Stopped]*");
     };
 
-    const processQuery = async (query: string) => {
-        setInput('');
-
-        // Find if message already exists (from queue UI) or add it
-        setMessages(prev => {
-            if (prev.some(m => m.content === query && m.status === 'queued')) {
-                return prev.map(m => m.content === query && m.status === 'queued' ? { ...m, status: 'processing' as const, role: 'user' as const } : m);
+    const processQuery = useCallback(async (query: string) => {
+        setMessages((prev) => {
+            if (prev.some((m) => m.content === query && m.status === "queued")) {
+                return prev.map((m) => m.content === query && m.status === "queued"
+                    ? { ...m, status: "processing" as const } : m);
             }
-            return [...prev, { id: Date.now().toString(), role: 'user', content: query, status: 'processing' }];
+            return [...prev, { id: Date.now().toString(), role: "user", content: query, status: "processing" }];
         });
-
         setLoading(true);
-        setStatusMessage("Starting agent...");
-        abortControllerRef.current = new AbortController();
+        setStatusMsg("Initialising agent...");
+        abortRef.current = new AbortController();
 
         try {
-            const payload: any = { message: query };
-            if (sessionId) payload.session_id = sessionId;
-            if (selectedModel) {
-                payload.model_name = selectedModel.id;
-                payload.provider = selectedModel.provider;
-            }
+            const res = await streamChat({
+                message: query,
+                session_id: sessionId ?? undefined,
+                model_name: selectedModelId,
+                provider: currentProvider,
+                forced_mode: mode,
+            }, abortRef.current.signal);
 
-            const response = await fetch('http://localhost:8261/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                signal: abortControllerRef.current.signal
-            });
+            if (!res.ok) throw new Error("Network error");
 
-            if (!response.ok) throw new Error('Network response was not ok');
-
-            const reader = response.body?.getReader();
+            const reader = res.body!.getReader();
             const decoder = new TextDecoder();
-
-            if (!reader) throw new Error("No reader available");
-
-            let finalContent = "";
             let buffer = "";
+            let finalContent = "";
+            let agentMsgId: string | null = null;  // id of the agent message bubble, null = not created yet
+            let createdSessionId: string | null = null;
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-
                 buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-
-                // Process all complete lines
-                buffer = lines.pop() || ""; // Keep the last incomplete line in buffer
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
 
                 for (const line of lines) {
                     if (!line.trim()) continue;
+                    let event: any;
                     try {
-                        const data = JSON.parse(line);
+                        const raw = JSON.parse(line);
+                        const parsed = StreamEventSchema.safeParse(raw);
+                        event = parsed.success ? parsed.data : raw;
+                    } catch { continue; }
 
-                        if (data.type === 'status') {
-                            setStatusMessage(data.content);
-                        } else if (data.type === 'token') {
-                            finalContent += data.content;
-                            // Progressively update UI
-                            setMessages(prev => {
-                                const newMsgs = [...prev];
-                                const last = newMsgs[newMsgs.length - 1];
-                                if (last && last.role === 'agent') {
-                                    last.content = finalContent;
-                                } else {
-                                    newMsgs.push({
-                                        id: Date.now().toString(),
-                                        role: 'agent',
-                                        content: finalContent
-                                    });
-                                }
-                                return newMsgs;
-                            });
-                        } else if (data.type === 'result') {
-                            finalContent = data.response;
-                            if (data.session_id) setSessionId(data.session_id);
-                        } else if (data.type === 'error') {
-                            console.error("Agent Error:", data.content);
-                            finalContent = "⚠️ Error: " + data.content;
+                    if (event.type === "status") {
+                        setStatusMsg(event.content);
+                    } else if (event.type === "token") {
+                        finalContent += event.content;
+                        const tokenContent = finalContent; // capture current value for closure
+                        if (!agentMsgId) {
+                            // Create the agent bubble once
+                            const newId = Date.now().toString() + "agent";
+                            agentMsgId = newId;
+                            setMessages((prev) => [
+                                ...prev,
+                                { id: newId, role: "agent" as const, content: tokenContent },
+                            ]);
+                        } else {
+                            // Update existing bubble by id (not by lastIndexOf, which is fragile)
+                            const capturedId = agentMsgId;
+                            setMessages((prev) =>
+                                prev.map((m) => m.id === capturedId ? { ...m, content: tokenContent } : m)
+                            );
                         }
-                    } catch (e) {
-                        console.error("Error parsing JSON line", e);
+                    } else if (event.type === "result") {
+                        finalContent = event.response;
+                        // Defer session creation until AFTER stream completes
+                        if (event.session_id) createdSessionId = event.session_id;
+                    } else if (event.type === "error") {
+                        finalContent = "⚠️ " + event.content;
                     }
                 }
             }
 
-            // Parse finalContent for widgets (same logic as before)
-            const rawContent = finalContent;
-
-            // Look for ```widget blocks
+            // Parse widgets from final content
             const widgetRegex = /```widget\n([\s\S]*?)```/g;
-            let match;
+            let match: RegExpExecArray | null;
+            while ((match = widgetRegex.exec(finalContent)) !== null) {
+                try { onNewWidget(JSON.parse(match[1])); } catch { /* skip malformed */ }
+            }
+            finalContent = finalContent.replace(widgetRegex, "*[Widget added to board →]*");
 
-            while ((match = widgetRegex.exec(rawContent)) !== null) {
-                try {
-                    const widgetJson = JSON.parse(match[1]);
-                    onNewWidget(widgetJson);
-                } catch (e) {
-                    console.error("Failed to parse widget JSON:", e);
-                }
+            // ── Smart top-2 table extraction → canvas ──────────────────────
+            // 1. Collect all valid GFM tables (must have separator row with ---)
+            interface ExtractedTable {
+                fullMatch: string;
+                block: string;
+                title: string;
+                cols: number;
+                rows: number;
+                score: number;
+            }
+            const allTables: ExtractedTable[] = [];
+            const tableRegex2 = /(?:^|\n)((?:\|[^\n]+\|\n)+)/g;
+            let tm: RegExpExecArray | null;
+            while ((tm = tableRegex2.exec(finalContent)) !== null) {
+                const fullMatch = tm[0];
+                const block = tm[1];
+                if (!block.includes("---")) continue;
+                const lines = block.trim().split("\n");
+                const headerCells = lines[0].split("|").map((c: string) => c.trim()).filter(Boolean);
+                const title = headerCells.length > 0 ? `Table: ${headerCells.join(" · ")}` : `Data Table`;
+                const cols = Math.max(headerCells.length, 2);
+                const rows = Math.max(lines.length - 2, 1);
+
+                // 2. Relevance score = keyword overlap between table content and user query
+                const queryWords = new Set(
+                    query.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w: string) => w.length > 2)
+                );
+                const tableText = block.toLowerCase();
+                let overlap = 0;
+                queryWords.forEach((w: string) => { if (tableText.includes(w)) overlap++; });
+
+                // Bonus: tables with more data rows are more informative
+                const rowBonus = Math.min(rows * 0.5, 5);
+                // Penalty for tables that are summary/overview (often less specific)
+                const positionPenalty = allTables.length > 2 ? 1 : 0;
+                const score = overlap + rowBonus - positionPenalty;
+
+                allTables.push({ fullMatch, block: block.trim(), title, cols, rows, score });
             }
 
-            // Clean up response string by removing the raw JSON blocks from UI
-            finalContent = finalContent.replace(widgetRegex, '[Interactive Widget added to Board]');
+            // 3. Sort by relevance and take top 2
+            const top2 = [...allTables].sort((a, b) => b.score - a.score).slice(0, 2);
+            const top2Blocks = new Set(top2.map((t) => t.block));
 
-            setMessages(prev => {
-                const newMsgs = [...prev];
-                const last = newMsgs[newMsgs.length - 1];
-                if (last && last.role === 'agent') {
-                    last.content = finalContent;
-                } else {
-                    newMsgs.push({
-                        id: (Date.now() + 1).toString(),
-                        role: 'agent',
-                        content: finalContent
-                    });
+            // 4. Replace matched tables — send top-2 to canvas, leave rest inline
+            for (const { fullMatch, block, title, cols, rows } of allTables) {
+                if (top2Blocks.has(block)) {
+                    onNewWidget({ type: "table", title, markdown: block, _cols: cols, _rows: rows });
+                    finalContent = finalContent.replace(
+                        fullMatch,
+                        `\n\n> 📊 **${title}** — *pinned to canvas*\n`
+                    );
                 }
-                return newMsgs;
-            });
+                // Tables NOT in top-2 stay rendered in chat as regular markdown
+            }
 
-        } catch (error: any) {
-            if (error.name === 'AbortError') {
-                console.log('Request aborted');
+
+            // Final update of the agent bubble (use saved id, not fragile lastIndexOf)
+            if (agentMsgId) {
+                const capturedId = agentMsgId;
+                setMessages((prev) =>
+                    prev.map((m) => m.id === capturedId ? { ...m, content: finalContent } : m)
+                );
             } else {
-                console.error(error);
-                setMessages(prev => [...prev, {
-                    id: (Date.now() + 1).toString(),
-                    role: 'agent',
-                    content: 'Error: Failed to connect to backend server. Please make sure the FastAPI server is running.'
-                }]);
+                // No tokens came through — push a fresh bubble
+                setMessages((prev) => [
+                    ...prev,
+                    { id: Date.now().toString() + "b", role: "agent" as const, content: finalContent },
+                ]);
+            }
+
+            // Fire session creation AFTER messages are fully settled
+            if (createdSessionId) onSessionCreated(createdSessionId);
+        } catch (e: any) {
+            if (e.name !== "AbortError") {
+                addMessage({ role: "agent", content: "❌ Failed to connect to the backend. Is the FastAPI server running on port 8261?" });
             }
         } finally {
             setLoading(false);
-            abortControllerRef.current = null;
+            abortRef.current = null;
         }
-    };
+    }, [sessionId, selectedModelId, currentProvider, mode, onNewWidget, onSessionCreated]);
 
-    const [activeTab, setActiveTab] = useState<'chat' | 'library'>('chat');
-    const [searchQuery, setSearchQuery] = useState('');
-
-    const handleDeleteDoc = async (docName: string) => {
-        if (!confirm(`Are you sure you want to delete ${docName}?`)) return;
-        try {
-            await fetch(`http://localhost:8261/api/documents/${docName}`, { method: 'DELETE' });
-            setUploadedDocs(prev => prev.filter(d => d !== docName));
-        } catch (e) { console.error(e); }
-    };
-
-    const handleManualSearch = async () => {
-        if (!searchQuery.trim()) return;
-        setLoading(true);
-        setStatusMessage("Searching documents...");
-        try {
-            const res = await fetch('http://localhost:8261/api/documents/search', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query: searchQuery, limit: 3 })
-            });
-            const data = await res.json();
-
-            // Inject results into chat
-            const resultsFormatted = data.results.map((r: any, i: number) =>
-                `**Result ${i + 1}** (${r.source}, Score: ${(r.score * 100).toFixed(0)}%)\n> "${r.text.substring(0, 200)}..."`
-            ).join('\n\n');
-
-            setMessages(prev => [
-                ...prev,
-                { id: Date.now().toString(), role: 'user', content: `Search for: "${searchQuery}"` },
-                { id: (Date.now() + 1).toString(), role: 'agent', content: resultsFormatted ? `Found these matches:\n\n${resultsFormatted}` : "No matches found." }
-            ]);
-            setActiveTab('chat');
-            setSearchQuery('');
-        } catch (e) {
-            console.error(e);
-        } finally {
-            setLoading(false);
-        }
-    };
-
+    // ── Render ───────────────────────────────────────────
     return (
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            {/* Header Area */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--panel-border)', paddingBottom: '12px', marginBottom: '16px' }}>
-                <h2 className="title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    KENT
-                </h2>
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
-                <div style={{ display: 'flex', gap: '8px' }}>
-                    {availableModels.length > 0 && (
-                        <select
-                            style={{
-                                background: 'rgba(255, 255, 255, 0.05)',
-                                color: 'var(--primary)',
-                                border: '1px solid var(--panel-border)',
-                                padding: '6px 12px',
-                                borderRadius: '8px',
-                                outline: 'none',
-                                fontSize: '0.85rem',
-                                cursor: 'pointer'
-                            }}
-                            value={selectedModel?.id || ''}
-                            onChange={(e) => {
-                                const model = availableModels.find(m => m.id === e.target.value);
-                                if (model) setSelectedModel(model);
-                            }}
-                        >
-                            {availableModels.map(m => (
-                                <option key={m.id} value={m.id} style={{ background: '#0d1117' }}>
-                                    {m.name}
-                                </option>
-                            ))}
-                        </select>
+            {/* ── Header ────────────────────────────────────── */}
+            <div style={{
+                padding: "14px 16px",
+                borderBottom: "1px solid var(--border-subtle)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                flexShrink: 0,
+                gap: "10px",
+            }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <MessageSquare size={18} color="var(--primary)" />
+                    <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text-primary)" }}>Chat</span>
+                    {sessionId && (
+                        <Badge variant="muted">{mode === "QUICK" ? "⚡ Quick" : "🧠 Deep"}</Badge>
                     )}
                 </div>
-            </div>
-
-            {/* Tabs */}
-            <div style={{ display: 'flex', gap: '16px', borderBottom: '1px solid var(--panel-border)', paddingBottom: '8px', marginBottom: '16px' }}>
-                <button
-                    onClick={() => setActiveTab('chat')}
-                    style={{
-                        background: 'none',
-                        border: 'none',
-                        color: activeTab === 'chat' ? 'var(--primary)' : 'var(--foreground)',
-                        fontSize: '0.9rem',
-                        fontWeight: activeTab === 'chat' ? 600 : 400,
-                        cursor: 'pointer',
-                        padding: '4px 8px',
-                        borderBottom: activeTab === 'chat' ? '2px solid var(--primary)' : '2px solid transparent'
-                    }}
-                >
-                    Chat
-                </button>
-                <button
-                    onClick={() => setActiveTab('library')}
-                    style={{
-                        background: 'none',
-                        border: 'none',
-                        color: activeTab === 'library' ? 'var(--primary)' : 'var(--foreground)',
-                        fontSize: '0.9rem',
-                        fontWeight: activeTab === 'library' ? 600 : 400,
-                        cursor: 'pointer',
-                        padding: '4px 8px',
-                        borderBottom: activeTab === 'library' ? '2px solid var(--primary)' : '2px solid transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px'
-                    }}
-                >
-                    Document Library {uploadedDocs.length > 0 && <span style={{ background: 'var(--primary)', color: '#fff', borderRadius: '12px', padding: '2px 6px', fontSize: '0.7rem' }}>{uploadedDocs.length}</span>}
-                </button>
-            </div>
-
-            {/* Views Setup */}
-            {activeTab === 'library' ? (
-                <div style={{ flex: 1, overflowY: 'auto', paddingRight: '8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div style={{ padding: '16px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '12px', border: '1px dashed var(--panel-border)' }}>
-                        <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                            <h3 style={{ margin: 0, fontSize: '1rem', color: 'var(--foreground)' }}>Knowledge Base</h3>
-
-                            <input
-                                type="file"
-                                ref={fileInputRef}
-                                onChange={(e) => { handleFileUpload(e); setActiveTab('chat'); }}
-                                style={{ display: 'none' }}
-                                accept=".pdf,.txt"
-                            />
-                            <button
-                                className="button"
-                                onClick={() => fileInputRef.current?.click()}
-                                disabled={uploading}
-                                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 12px', fontSize: '0.85rem' }}
-                            >
-                                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Paperclip size={14} />}
-                                Add Document
-                            </button>
-                        </div>
-
-                        <div className="search-bar" style={{ marginBottom: '16px', display: 'flex', gap: '8px' }}>
-                            <input
-                                type="text"
-                                placeholder="Search all documents..."
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                style={{
-                                    flex: 1,
-                                    padding: '8px 12px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--panel-border)',
-                                    background: 'rgba(0,0,0,0.2)',
-                                    color: '#fff'
-                                }}
-                                onKeyDown={(e) => e.key === 'Enter' && handleManualSearch()}
-                            />
-                            <button
-                                onClick={handleManualSearch}
-                                style={{
-                                    padding: '8px 12px',
-                                    borderRadius: '8px',
-                                    border: '1px solid var(--panel-border)',
-                                    background: 'var(--primary)',
-                                    color: '#fff',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                Search
-                            </button>
-                        </div>
-
-                        {uploadedDocs.length === 0 ? (
-                            <div style={{ textAlign: 'center', padding: '32px 0', opacity: 0.6 }}>
-                                No documents uploaded yet. Add company SEC filings, internal memos, or strategy docs to provide the AI with context.
-                            </div>
-                        ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                                {uploadedDocs.map((doc, i) => (
-                                    <div key={i} style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '12px',
-                                        padding: '12px',
-                                        background: 'rgba(255, 255, 255, 0.05)',
-                                        borderRadius: '8px',
-                                        border: '1px solid rgba(255, 255, 255, 0.1)'
-                                    }}>
-                                        <Paperclip size={18} style={{ color: 'var(--primary)' }} />
-                                        <div style={{ flex: 1, fontSize: '0.9rem', color: 'var(--foreground)' }}>{doc}</div>
-                                        <button
-                                            onClick={() => handleDeleteDoc(doc)}
-                                            style={{
-                                                background: 'none',
-                                                border: 'none',
-                                                color: '#f85149',
-                                                cursor: 'pointer',
-                                                padding: '4px',
-                                                borderRadius: '4px',
-                                                opacity: 0.7
-                                            }}
-                                            title="Delete Document"
-                                        >
-                                            ✕
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                        onClick={() => setActiveTab(activeTab === "library" ? "chat" : "library")}
+                        title="Document Library"
+                        style={{
+                            background: activeTab === "library" ? "var(--primary-dim)" : "transparent",
+                            border: "1px solid " + (activeTab === "library" ? "rgba(88,166,255,0.25)" : "var(--border-subtle)"),
+                            color: activeTab === "library" ? "var(--primary)" : "var(--text-muted)",
+                            cursor: "pointer",
+                            padding: "6px 10px",
+                            borderRadius: "var(--radius-sm)",
+                            display: "flex", alignItems: "center", gap: "5px",
+                            fontSize: "0.8rem",
+                            transition: "all 0.2s ease",
+                        }}
+                    >
+                        <Library size={14} />
+                        {uploadedDocs.length > 0 && (
+                            <span style={{
+                                background: "var(--primary)", color: "#fff",
+                                borderRadius: "8px", padding: "0px 5px", fontSize: "0.65rem", fontWeight: 700,
+                            }}>{uploadedDocs.length}</span>
                         )}
-                    </div>
+                    </button>
+                    <button
+                        onClick={() => setShowControls((c) => !c)}
+                        title="Model & Mode settings"
+                        style={{
+                            background: showControls ? "var(--bg-elevated)" : "transparent",
+                            border: "1px solid var(--border-subtle)",
+                            color: "var(--text-muted)",
+                            cursor: "pointer",
+                            padding: "6px 8px",
+                            borderRadius: "var(--radius-sm)",
+                            display: "flex", alignItems: "center",
+                            transition: "all 0.2s ease",
+                        }}
+                    >
+                        {showControls ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    </button>
                 </div>
-            ) : (
-                <>
-                    <div style={{ flex: 1, overflowY: 'auto', paddingRight: '8px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                        {messages.length === 0 && (
-                            <div style={{ color: 'var(--foreground)', opacity: 0.6, fontStyle: 'italic', textAlign: 'center', margin: 'auto' }}>
-                                Ask me to render a graph, analyze a company, or build a DCF model...
-                            </div>
-                        )}
+            </div>
 
-                        {messages.map(msg => (
-                            <div
-                                key={msg.id}
-                                style={{
-                                    alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                                    backgroundColor: msg.role === 'user' ? 'var(--primary)' : 'rgba(255, 255, 255, 0.05)',
-                                    color: msg.role === 'user' ? '#fff' : 'var(--foreground)',
-                                    padding: '12px 16px',
-                                    borderRadius: '12px',
-                                    maxWidth: '85%',
-                                    border: msg.role === 'agent' ? '1px solid var(--panel-border)' : 'none',
-                                    lineHeight: '1.5',
-                                    whiteSpace: msg.role === 'user' ? 'pre-wrap' : 'normal',
-                                    overflowWrap: 'anywhere'
-                                }}
-                            >
-                                {msg.role === 'agent' ? (
-                                    <div className="markdown-body">
-                                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                                    </div>
-                                ) : (
-                                    msg.content
-                                )}
+            {/* ── Controls drawer ────────────────────────────── */}
+            {showControls && (
+                <div style={{
+                    padding: "12px 16px",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    background: "var(--bg-elevated)",
+                    flexShrink: 0,
+                    animation: "fadeIn 0.2s ease",
+                }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>Research Mode</span>
+                        <ModeToggle value={mode} onChange={setMode} />
+                    </div>
+                    {models.length > 0 && (
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                            <span style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 600 }}>Model</span>
+                            <Select
+                                value={selectedModelId}
+                                onChange={setSelectedModelId}
+                                options={models.map((m) => ({ value: m.id, label: m.name }))}
+                                style={{ maxWidth: "200px" }}
+                            />
+                        </div>
+                    )}
+                    {mode === "DEEP" && (
+                        <p style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
+                            🧠 <strong>Deep mode</strong> enables comprehensive analysis: DCF modelling, peer benchmarking, and thesis generation. Responses may take longer.
+                        </p>
+                    )}
+                </div>
+            )}
+
+            {/* ── Document Library tab ──────────────────────── */}
+            {activeTab === "library" && (
+                <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
+                    {/* Upload */}
+                    <div style={{ marginBottom: "16px", display: "flex", gap: "8px" }}>
+                        <input type="file" ref={fileInputRef} onChange={handleFileUpload} style={{ display: "none" }} accept=".pdf,.txt" />
+                        <Button
+                            onClick={() => fileInputRef.current?.click()}
+                            loading={uploading}
+                            icon={<Paperclip size={14} />}
+                            size="sm"
+                            style={{ flex: 1 }}
+                        >
+                            {uploading ? "Uploading…" : "Upload Document"}
+                        </Button>
+                    </div>
+
+                    {/* Search */}
+                    <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                        <Input
+                            placeholder="Search documents…"
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                            icon={<Search size={14} />}
+                            style={{ flex: 1 }}
+                        />
+                        <Button size="sm" loading={searching} onClick={handleSearch} icon={<Search size={14} />}>
+                            Search
+                        </Button>
+                    </div>
+
+                    <Divider label="Indexed Documents" />
+
+                    <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                        {uploadedDocs.length === 0 ? (
+                            <EmptyState icon="📄" title="No documents yet" description="Upload PDFs or TXTs to give the agent company-specific context." />
+                        ) : uploadedDocs.map((doc) => (
+                            <div key={doc} style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "10px",
+                                padding: "8px 12px",
+                                background: "var(--bg-elevated)",
+                                borderRadius: "var(--radius-sm)",
+                                border: "1px solid var(--border-subtle)",
+                            }}>
+                                <Paperclip size={14} color="var(--primary)" style={{ flexShrink: 0 }} />
+                                <span style={{ flex: 1, fontSize: "0.85rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc}</span>
+                                <button onClick={() => handleDeleteDoc(doc)} title="Delete"
+                                    style={{ background: "none", border: "none", color: "var(--red)", cursor: "pointer", display: "flex", padding: "2px" }}>
+                                    <X size={14} />
+                                </button>
                             </div>
                         ))}
-
-                        {/* Queue Indicator */}
-                        {queue.length > 0 && (
-                            <div style={{ alignSelf: 'center', margin: '8px 0', padding: '8px 16px', background: 'rgba(255,255,255,0.05)', borderRadius: '20px', fontSize: '0.8rem', color: 'var(--secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <Layers size={14} />
-                                {queue.length} queries queued
-                            </div>
-                        )}
-
-                        {loading && (
-                            <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '8px', padding: '12px', color: 'var(--accent)' }}>
-                                <Loader2 className="animate-spin" size={18} />
-                                <span style={{ fontSize: '0.9rem' }}>{statusMessage}</span>
-                            </div>
-                        )}
-                        <div ref={messagesEndRef} />
                     </div>
-
-                    <form onSubmit={handleSubmit} style={{ display: 'flex', gap: '8px', marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--panel-border)' }}>
-                        <input
-                            type="file"
-                            ref={fileInputRef}
-                            onChange={(e) => handleFileUpload(e)}
-                            style={{ display: 'none' }}
-                            accept=".pdf,.txt"
-                        />
-                        <button
-                            type="button"
-                            className="button"
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={uploading}
-                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 12px', background: 'rgba(255, 255, 255, 0.05)', color: 'var(--foreground)' }}
-                            title="Upload Company Document"
-                        >
-                            {uploading ? <Loader2 size={18} className="animate-spin" /> : <Paperclip size={18} />}
-                        </button>
-                        <input
-                            type="text"
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            placeholder={loading ? "Type to queue query..." : "e.g., Draw an advanced stock graph of AAPL for the last 6 months..."}
-                            className="input"
-                        />
-                        {loading ? (
-                            <button
-                                type="button"
-                                className="button"
-                                onClick={handleStop}
-                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px', background: '#f85149', borderColor: '#da3633' }}
-                                title="Stop Generation"
-                            >
-                                <StopCircle size={18} />
-                            </button>
-                        ) : (
-                            <button type="submit" className="button" disabled={!input.trim()} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 16px' }}>
-                                <Send size={18} />
-                            </button>
-                        )}
-                    </form>
-                </>
+                </div>
             )}
+
+            {/* ── Chat messages ─────────────────────────────── */}
+            {activeTab === "chat" && (
+                <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {messages.length === 0 && (
+                        <EmptyState
+                            icon="💬"
+                            title="How can KEN help?"
+                            description={'Ask me to analyse stocks, build a DCF model, or say "I bought 100 shares of AAPL".'}
+                        />
+                    )}
+
+                    {messages.map((msg) => (
+                        <div key={msg.id} style={{
+                            alignSelf: msg.role === "user" ? "flex-end" : "flex-start",
+                            maxWidth: "92%",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "4px",
+                        }}>
+                            {msg.status === "queued" && (
+                                <span style={{ fontSize: "0.7rem", color: "var(--text-muted)", alignSelf: "flex-end" }}>queued</span>
+                            )}
+                            <div style={{
+                                padding: msg.role === "user" ? "10px 14px" : "12px 16px",
+                                borderRadius: msg.role === "user"
+                                    ? "var(--radius-md) var(--radius-md) 4px var(--radius-md)"
+                                    : "4px var(--radius-md) var(--radius-md) var(--radius-md)",
+                                background: msg.role === "user"
+                                    ? "var(--primary)"
+                                    : "var(--bg-elevated)",
+                                border: msg.role === "agent" ? "1px solid var(--border-subtle)" : "none",
+                                color: msg.role === "user" ? "#fff" : "var(--text-primary)",
+                                fontSize: "0.875rem",
+                                lineHeight: 1.65,
+                                overflowWrap: "anywhere",
+                                boxShadow: msg.role === "user"
+                                    ? "0 2px 8px rgba(88,166,255,0.2)"
+                                    : "var(--shadow-sm)",
+                            }}>
+                                {msg.role === "agent" ? (
+                                    <div className="markdown-body">
+                                        <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                            components={{
+                                                table: ({ children }) => (
+                                                    <div className="md-table-wrap">
+                                                        <table>{children}</table>
+                                                    </div>
+                                                ),
+                                            }}
+                                        >{msg.content}</ReactMarkdown>
+                                    </div>
+                                ) : (
+                                    <span>{msg.content}</span>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+
+                    {queue.length > 0 && (
+                        <div style={{
+                            alignSelf: "center", display: "flex", alignItems: "center", gap: "8px",
+                            padding: "6px 14px", background: "var(--bg-elevated)", borderRadius: "20px",
+                            border: "1px solid var(--border-subtle)", fontSize: "0.8rem", color: "var(--text-secondary)",
+                        }}>
+                            <Layers size={13} />
+                            {queue.length} {queue.length === 1 ? "query" : "queries"} queued
+                        </div>
+                    )}
+
+                    {loading && (
+                        <div style={{
+                            alignSelf: "flex-start", display: "flex", alignItems: "center", gap: "10px",
+                            padding: "10px 14px", background: "var(--bg-elevated)",
+                            borderRadius: "4px var(--radius-md) var(--radius-md) var(--radius-md)",
+                            border: "1px solid var(--border-subtle)", boxShadow: "var(--shadow-sm)",
+                        }}>
+                            <StatusDot color="var(--primary)" pulse />
+                            <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>{statusMsg}</span>
+                        </div>
+                    )}
+
+                    <div ref={messagesEndRef} />
+                </div>
+            )}
+
+            {/* ── Input area ────────────────────────────────── */}
+            <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border-subtle)", flexShrink: 0 }}>
+                <form onSubmit={handleSubmit} style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
+                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} style={{ display: "none" }} accept=".pdf,.txt" />
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={uploading}
+                        title="Upload document"
+                        style={{
+                            background: "var(--bg-elevated)",
+                            border: "1px solid var(--border-subtle)",
+                            color: "var(--text-muted)",
+                            padding: "9px 11px",
+                            borderRadius: "var(--radius-sm)",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            flexShrink: 0,
+                            transition: "all 0.2s ease",
+                        }}
+                    >
+                        {uploading ? <Spinner size={16} /> : <Paperclip size={16} />}
+                    </button>
+
+                    <input
+                        className="input"
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        placeholder={loading ? "Type to queue…" : "Ask about markets, stocks, portfolios…"}
+                        style={{ flex: 1, borderRadius: "var(--radius-sm)", padding: "9px 14px" }}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                                e.preventDefault();
+                                handleSubmit(e as any);
+                            }
+                        }}
+                    />
+
+                    {loading ? (
+                        <Button type="button" variant="danger" onClick={handleStop} icon={<StopCircle size={16} />} size="md">
+                            Stop
+                        </Button>
+                    ) : (
+                        <Button type="submit" disabled={!input.trim()} icon={<Send size={16} />} size="md">
+                            Send
+                        </Button>
+                    )}
+                </form>
+            </div>
         </div>
     );
 }

@@ -1,4 +1,4 @@
-PROJECT DOCUMENTATION - KENT (financial research agent)
+PROJECT DOCUMENTATION - KEN (financial research agent)
 
 1. PROJECT OVERVIEW
 -------------------

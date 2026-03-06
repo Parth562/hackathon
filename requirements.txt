@@ -16,3 +16,9 @@ python-dotenv
 duckduckgo-search
 beautifulsoup4
 pypdf
+redis
+rank_bm25
+scikit-learn
+prophet
+statsmodels
+yfinance --upgrade

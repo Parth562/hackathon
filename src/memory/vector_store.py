@@ -120,7 +120,13 @@ class MemoryManager:
 
     def __init__(self, collection_name: str = "financial_memory"):
         self.namespace = "memories"
-        self._store = _load_or_create(self.namespace)
+        self._store_instance = None
+
+    @property
+    def _store(self):
+        if self._store_instance is None:
+            self._store_instance = _load_or_create(self.namespace)
+        return self._store_instance
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -201,8 +207,20 @@ class DocumentStore:
 
     def __init__(self, collection_name: str = "company_documents"):
         self.namespace = "documents"
-        self._store = _load_or_create(self.namespace)
-        self._id_map: Dict[str, List[str]] = _load_id_map(self.namespace)
+        self._store_instance = None
+        self._id_map_instance = None
+
+    @property
+    def _store(self):
+        if self._store_instance is None:
+            self._store_instance = _load_or_create(self.namespace)
+        return self._store_instance
+
+    @property
+    def _id_map(self):
+        if self._id_map_instance is None:
+            self._id_map_instance = _load_id_map(self.namespace)
+        return self._id_map_instance
 
     # ── Persistence helpers ───────────────────────────────────────────────────
 
@@ -246,32 +264,97 @@ class DocumentStore:
         return ids
 
     def retrieve_relevant_memories(
-        self, query: str, limit: int = 5, use_mmr: bool = False
+        self, query: str, limit: int = 5, use_mmr: bool = False, use_hybrid: bool = True
     ) -> List[Dict[str, Any]]:
-        """Similarity search (cosine). Returns top-k results with scores."""
+        """Similarity search (hybrid cosine + bm25). Returns top-k results with scores."""
         if self._store.index.ntotal == 0:
             return []
+            
+        # Get Semantic Results (FAISS)
         if use_mmr:
-            hits = self._store.max_marginal_relevance_search(query, k=limit)
-            return [
+            faiss_hits = self._store.max_marginal_relevance_search(query, k=limit*2)
+            faiss_results = [
                 {
-                    "id": "",
-                    "score": None,
+                    "id": str(i), 
+                    "score": 1.0 / (i + 1), # mock score for RRF
                     "text": doc.page_content,
                     "metadata": doc.metadata,
                 }
-                for doc in hits
+                for i, doc in enumerate(faiss_hits)
             ]
-        hits = self._store.similarity_search_with_score(query, k=limit)
-        return [
-            {
-                "id": "",
-                "score": float(score),
-                "text": doc.page_content,
-                "metadata": doc.metadata,
-            }
-            for doc, score in hits
-        ]
+        else:
+            faiss_hits = self._store.similarity_search_with_score(query, k=limit*2)
+            faiss_results = [
+                {
+                    "id": str(i),
+                    "score": float(score),
+                    "text": doc.page_content,
+                    "metadata": doc.metadata,
+                }
+                for i, (doc, score) in enumerate(faiss_hits)
+            ]
+
+        if not use_hybrid:
+            return faiss_results[:limit]
+            
+        # Get Lexical Results (BM25)
+        try:
+            from rank_bm25 import BM25Okapi
+            # We need the full pool of documents
+            all_docs_dict = self._store.docstore._dict
+            all_docs = list(all_docs_dict.values())
+            
+            if not all_docs:
+                return faiss_results[:limit]
+                
+            tokenized_corpus = [doc.page_content.lower().split(" ") for doc in all_docs]
+            bm25 = BM25Okapi(tokenized_corpus)
+            tokenized_query = query.lower().split(" ")
+            
+            bm25_scores = bm25.get_scores(tokenized_query)
+            
+            # Sort all docs by BM25 score
+            bm25_ranked = []
+            for idx, score in enumerate(bm25_scores):
+                if score > 0:
+                    bm25_ranked.append({
+                        "id": str(idx),
+                        "score": score,
+                        "text": all_docs[idx].page_content,
+                        "metadata": all_docs[idx].metadata
+                    })
+                    
+            bm25_ranked = sorted(bm25_ranked, key=lambda x: x["score"], reverse=True)[:limit*2]
+            
+            # Reciprocal Rank Fusion (RRF)
+            # RRF Score = 1 / (k + rank)
+            k = 60
+            rrf_scores = {}
+            doc_map = {}
+            
+            for rank, item in enumerate(faiss_results):
+                text_key = item["text"]
+                doc_map[text_key] = item
+                rrf_scores[text_key] = rrf_scores.get(text_key, 0) + (1.0 / (k + rank + 1))
+                
+            for rank, item in enumerate(bm25_ranked):
+                text_key = item["text"]
+                if text_key not in doc_map:
+                    doc_map[text_key] = item
+                rrf_scores[text_key] = rrf_scores.get(text_key, 0) + (1.0 / (k + rank + 1))
+                
+            # Sort by fused score
+            fused_results = []
+            for text_key, rrf_score in sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True):
+                item = doc_map[text_key]
+                item["score"] = rrf_score
+                fused_results.append(item)
+                
+            return fused_results[:limit]
+            
+        except ImportError:
+            # Fallback to pure semantic search if BM25 isn't available
+            return faiss_results[:limit]
 
     def delete_document_by_source(self, source_filename: str) -> bool:
         """

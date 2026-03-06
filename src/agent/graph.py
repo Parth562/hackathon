@@ -1,4 +1,5 @@
 import os
+import asyncio
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -14,11 +15,26 @@ from src.tools.scraping_tools import search_web, scrape_webpage
 from src.tools.analysis_tools import calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading, calculate_dcf, create_custom_widget, analyze_supply_chain_impact
 from src.tools.graphing_tools import render_stock_comparison_graph, render_advanced_stock_graph
 from src.tools.document_tools import search_company_documents
+from src.tools.portfolio_tools import analyze_portfolio, update_portfolio
+from src.tools.financial_analysis_tools import (
+    get_kpi_dashboard, get_peer_benchmarking, get_risk_score,
+    generate_bull_bear_thesis, run_scenario_analysis, predict_stock_price,
+)
+from src.tools.ml_analysis_tools import (
+    classify_trade_signal, forecast_price_prophet,
+    get_technical_indicators, detect_bollinger_breakout,
+)
 from src.memory.vector_store import MemoryManager
 from src.memory.sqlite_store import StructuredStore
 
-# Initialize memory stores
-memory_manager = MemoryManager()
+# Initialize memory stores lazily to prevent PyTorch OOM on import
+_memory_manager_instance = None
+def get_memory_manager():
+    global _memory_manager_instance
+    if _memory_manager_instance is None:
+        _memory_manager_instance = MemoryManager()
+    return _memory_manager_instance
+
 structured_store = StructuredStore()
 
 # Define tools
@@ -38,255 +54,67 @@ tools = [
      calculate_dcf,
      create_custom_widget,
      search_company_documents,
-     analyze_supply_chain_impact
+     analyze_supply_chain_impact,
+     analyze_portfolio,
+     update_portfolio,
+     # Financial analysis suite
+     get_kpi_dashboard,
+     get_peer_benchmarking,
+     get_risk_score,
+     generate_bull_bear_thesis,
+     run_scenario_analysis,
+     predict_stock_price,
+     # ML & advanced analysis
+     classify_trade_signal,
+     forecast_price_prophet,
+     get_technical_indicators,
+     detect_bollinger_breakout,
 ]
 
 # Dynamic LLM Loader
 def get_llm(state: AgentState = None):
-     model_name = "glm-5:cloud"
-     provider = "ollama"
-     if state:
-         model_name = state.get('model_name', model_name) or model_name
-         provider = state.get('provider', provider) or provider
+    model_name = "glm-5:cloud"
+    provider = "ollama"  # Always force ollama for now
+    if state:
+        model_name = state.get('model_name', model_name) or model_name
+        # Ignoring state provider to bypass leaked Gemini key
+        # provider = state.get('provider', provider) or provider
          
-     if provider == "ollama":
-         return ChatOllama(model=model_name, temperature=0.1, streaming=True, base_url="http://localhost:11434")
-     else:
-         return ChatGoogleGenerativeAI(model=model_name, temperature=0.1, streaming=True)
+    # Force ollama
+    return ChatOllama(model=model_name, temperature=0.1, streaming=True, base_url="http://localhost:11434")
 
-# Helper Node: Setup and routing
-def triage_node(state: AgentState) -> AgentState:
+from src.agent.nodes.planner_node import planner_node
+from src.agent.nodes.worker_nodes import research_node, data_node, analysis_node, critic_node
+from src.agent.nodes.report_node import report_node
+
+def create_agent_graph() -> StateGraph:
     """
-    Determines if the request is Quick or Deep mode, extracts explicitly mentioned
-    user preferences to store in memory, and sets up the system prompt.
+    Builds the 5-Agent Pipeline Architecture:
+    Planner -> Research -> Data -> Analysis -> Critic -> Report
     """
-    llm = get_llm(state)
-    messages = state['messages']
-    user_query = messages[-1].content if messages else ""
+    builder = StateGraph(AgentState)
     
-    # 1. Fetch relevant long-term memories
-    relevant_memories = memory_manager.retrieve_relevant_memories(user_query, limit=3)
-    memory_context = "User Preferences & History:\n" + ("\n".join([m['text'] for m in relevant_memories]) if relevant_memories else "No specific past context found.")
+    # 1. Add all single-responsibility agent nodes
+    builder.add_node("planner",  planner_node)
+    builder.add_node("research", research_node)
+    builder.add_node("data",     data_node)
+    builder.add_node("analysis", analysis_node)
+    builder.add_node("critic",   critic_node)
+    builder.add_node("report",   report_node)
     
-    # 1b. Fetch relevant company documents automatically with Query Expansion
-    from src.tools.document_tools import document_store
+    # 2. Define the Entry Point
+    builder.set_entry_point("planner")
     
-    # Generate variations of the query for better semantic search
-    expansion_prompt = f"""
-    You are an expert financial search query generator.
-    Your task is to generate 3 different versions of the given user query to optimize document retrieval from a vector database.
-    By generating multiple perspectives, we can overcome limitations of distance-based similarity search.
-    Provide these alternative questions separated by newlines. DO NOT number them or add any other text.
+    # 3. Connect them sequentially
+    builder.add_edge("planner",  "research")
+    builder.add_edge("research", "data")
+    builder.add_edge("data",     "analysis")
+    builder.add_edge("analysis", "critic")
+    builder.add_edge("critic",   "report")
+    builder.add_edge("report",   END)
     
-    Original query: {user_query}
-    """
-    try:
-        variations_text = llm.invoke([HumanMessage(content=expansion_prompt)]).content
-        queries = [q.strip() for q in variations_text.split('\n') if q.strip()]
-        queries.append(user_query) # Always include original
-    except Exception:
-        queries = [user_query]
-        
-    all_hits = []
-    seen_texts = set()
+    # 4. Compile graph
+    return builder.compile()
 
-    for q in queries:
-        hits = document_store.retrieve_relevant_memories(q, limit=3, use_mmr=True)
-        for hit in hits:
-            # Dedup by text content (MMR returns id='' so can't use id)
-            text_key = hit['text'][:120]
-            if text_key not in seen_texts:
-                seen_texts.add(text_key)
-                all_hits.append(hit)
-
-    # Sort distinct hits by score (MMR hits have score=None; put them last)
-    all_hits = sorted(all_hits, key=lambda x: x.get('score') or 0, reverse=True)[:5]
-    
-    if all_hits:
-        memory_context += "\n\nRelevant Information from Uploaded Documents:\n"
-        for idx, hit in enumerate(all_hits):
-            source = hit.get('metadata', {}).get('source', 'Unknown Document')
-            memory_context += f"--- Excerpt {idx+1} (Source: {source}) ---\n{hit['text']}\n\n"
-    
-    # 2. Check if we need to store new preferences
-    memory_extraction_prompt = f"""
-    Analyze the following user query for explicitly stated investment preferences, risk tolerance, 
-    key performance indicators (KPIs) like EBITDA or ROE, preferred sectors, or geographies.
-    
-    If you find any, summarize them concisely. If none, return 'NONE'.
-    
-    User Query: {user_query}
-    """
-    extraction_result = llm.invoke([HumanMessage(content=memory_extraction_prompt)]).content.strip()
-    
-    if extraction_result and extraction_result.upper() != "NONE":
-        memory_manager.store_memory(extraction_result, metadata={"type": "extracted_preference"})
-        # Ensure we use it right now
-        memory_context += "\nNew Preference Tracked: " + extraction_result
-    
-    # 3. Classify Mode (Quick vs Deep)
-    mode_classification_prompt = f"""
-    Is the following query a 'Quick' request (e.g., getting a recent stock price, summarizing last earnings) 
-    or a 'Deep' request (e.g., fundamental analysis, peer benchmarking, bull/bear thesis generation, scenario analysis)?
-    
-    Respond with exactly 'QUICK' or 'DEEP'.
-    
-    User Query: {user_query}
-    """
-    mode = llm.invoke([HumanMessage(content=mode_classification_prompt)]).content.strip().upper()
-    if "DEEP" in mode:
-        research_mode = "DEEP"
-    else:
-        research_mode = "QUICK"
-        
-    return {
-         "memory_context": memory_context,
-         "research_mode": research_mode
-    }
-
-def research_agent_node(state: AgentState) -> AgentState:
-    """
-    The main reasoning node. Makes tool calls or provides final answers.
-    """
-    llm = get_llm(state)
-    llm_with_tools = llm.bind_tools(tools)
-    
-    mode = state.get('research_mode', 'QUICK')
-    memory = state.get('memory_context', '')
-    
-    # Construct base prompt depending on mode
-    sys_prompt = f"""
-    You are a highly capable Financial & Market Research Agent, behaving like a junior equity analyst or strategy consultant.
-    Your task is to produce decision-ready insights with transparency and traceability.
-    
-    Current Research Mode: {mode}. 
-    - Quick Mode: Be concise. Summarize metrics quickly. Target < 30s processing.
-    - Deep Mode: Be comprehensive. Perform fundamental analysis, peer benchmarking, or bull/bear thesis generation. Target clear explanations.
-    
-    User Long-Term Memory & Preferences (Apply these to your analysis!):
-    {memory}
-    
-    CRITICAL UI REQUIREMENTS - YOU MUST PRIORITIZE WIDGETS OVER TEXT:
-    - ALWAYS PREFER to display financial data, comparisons, and numbers using UI widgets. Do not output walls of text.
-    - If the user asks for ANY metrics, comparisons, or KPI tables, MUST USE the `create_custom_widget` tool with `content_type="metrics"`.
-    - If the user asks to "draw", "render", or "show a graph", MUST CALL `render_stock_comparison_graph` OR `render_advanced_stock_graph`.
-    - If the user asks for a generic visual, diagram, chart, pie chart, or unformatted data visualization that is not covered by specific tools, YOU MUST use the `create_custom_widget` tool to build a UI widget. DO NOT say you cannot draw charts. Use `create_custom_widget` with `content_type="chart"` and provide the exact required JSON schema to render ANY data graphically.
-    - Explain your assumptions clearly! (e.g., 'Assuming standard PE ratios apply this quarter...').
-    - If the user asks for a valuation or fair price, MUST USE the `calculate_dcf` tool to perform a Discounted Cash Flow model.
-    - If the user asks about supply chain analysis, suppliers, or customers, MUST USE the `analyze_supply_chain_impact` tool.
-    - If the user asks about executives or insider actions, USE `get_insider_trading`.
-    - If you see contradictions between your tool results (e.g., Yahoo Finance says price is up, but news says it's down), explicitly state them.
-    - Suggest follow up questions the user could ask (e.g. 'Would you like to stress test under high inflation?').
-    """
-    
-    # Format messages for the LLM
-    current_messages = [SystemMessage(content=sys_prompt)] + state['messages']
-    
-    # Invoke
-    response = llm_with_tools.invoke(current_messages)
-    
-    return {"messages": [response]}
-    
-def should_continue(state: AgentState) -> str:
-    """Conditional routing: loop to tools or end."""
-    messages = state['messages']
-    last_message = messages[-1]
-    
-    if last_message.tool_calls:
-        return "continue"
-        
-    return "end"
-
-def synthesis_node(state: AgentState) -> AgentState:
-    """
-    Final synthesis block. 
-    Can extract assumptions, confidence scores, and format the final insight for the user.
-    Records structured logs.
-    """
-    # For now, we will just format the final LLM response as the final insight
-    # and log it to SQLite.
-    
-    messages = state['messages']
-    last_content = messages[-1].content
-    
-    # Handle Gemini-specific list structure to return clean text instead of a raw dictionary representation
-    if isinstance(last_content, list):
-        text_parts = []
-        for block in last_content:
-            if isinstance(block, dict) and 'text' in block:
-                text_parts.append(block['text'])
-            elif isinstance(block, str):
-                text_parts.append(block)
-        last_content = "\n".join(text_parts)
-    
-    import json
-    import re
-
-    # Strip any LLM-hallucinated widget blocks to prevent corrupted JSON or duplicates
-    last_content = re.sub(r"```widget\n[\s\S]*?```", "", last_content)
-    
-    # Intercept pure tool payloads to guarantee front-end widget consistency
-    recent_tool_widgets = []
-    # Iterate backwards through messages to find tools executed during this specific round
-    for msg in reversed(messages[:-1]): # Exclude the final AIMessage itself
-        if isinstance(msg, HumanMessage):
-            break
-        if isinstance(msg, ToolMessage):
-            try:
-                # Try to parse the raw Python tool output as JSON
-                tool_data = json.loads(msg.content)
-                # Check if it has a widget signature
-                if isinstance(tool_data, dict) and ('widget_type' in tool_data or 'chart_type' in tool_data or 'type' in tool_data or 'all_data' in tool_data):
-                    widget_md = f"\n```widget\n{msg.content}\n```\n"
-                    recent_tool_widgets.append(widget_md)
-            except Exception:
-                pass
-
-    if recent_tool_widgets:
-        last_content += "\n" + "".join(recent_tool_widgets)
-
-    # Ensure it's pushed back to the state so the chat history loop prints cleanly
-    messages[-1].content = last_content
-    
-    # In a full production app, we would use LLM structural extraction here to fill
-    # the assumption list and confidence score. For hackathon scope, we trust the agent's prose 
-    # and log the result.
-    
-    # Log to sqlite
-    user_query = [m for m in state['messages'] if isinstance(m, HumanMessage)][0].content
-    
-    structured_store.log_research(
-        session_id=state.get('session_id', 'unknown'),
-        query=user_query,
-        mode=state.get('research_mode', 'unknown'),
-        result={"final_answer": last_content},
-        assumptions=["Logged in full text response"] # simplified
-    )
-    
-    return {"final_insight": last_content}
-
-# Build the Graph
-workflow = StateGraph(AgentState)
-
-# Nodes
-workflow.add_node("triage", triage_node)
-workflow.add_node("agent", research_agent_node)
-workflow.add_node("tools", ToolNode(tools))
-workflow.add_node("synthesis", synthesis_node)
-
-# Edges
-workflow.set_entry_point("triage")
-workflow.add_edge("triage", "agent")
-workflow.add_conditional_edges(
-    "agent",
-    should_continue,
-    {
-        "continue": "tools",
-        "end": "synthesis"
-    }
-)
-workflow.add_edge("tools", "agent")
-workflow.add_edge("synthesis", END)
-
-# Compile
-app = workflow.compile()
+# Export the compiled graph instance
+app = create_agent_graph()

@@ -8,6 +8,14 @@ import InsiderWidget from './InsiderWidget';
 import EcosystemWidget from './EcosystemWidget';
 import SupplyChainWidget from './SupplyChainWidget';
 import CustomWidget from './CustomWidget';
+import PortfolioWidget from './PortfolioWidget';
+import KpiDashboardWidget from './KpiDashboardWidget';
+import PeerBenchmarkWidget from './PeerBenchmarkWidget';
+import ThesisWidget from './ThesisWidget';
+import RiskScoreWidget from './RiskScoreWidget';
+import ScenarioWidget from './ScenarioWidget';
+import PredictionWidget from './PredictionWidget';
+import TableWidget from './TableWidget';
 
 // Wrapper component that renders the specific widget based on type
 const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean }) => {
@@ -41,6 +49,22 @@ const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean })
         content = <SupplyChainWidget data={widgetData} onClose={handleClose} />;
     } else if (widgetType === 'custom') {
         content = <CustomWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'portfolio_analysis') {
+        content = <PortfolioWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'kpi_dashboard') {
+        content = <KpiDashboardWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'peer_benchmark') {
+        content = <PeerBenchmarkWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'thesis') {
+        content = <ThesisWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'risk_score') {
+        content = <RiskScoreWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'scenario') {
+        content = <ScenarioWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'prediction') {
+        content = <PredictionWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'table') {
+        content = <TableWidget data={widgetData} onClose={handleClose} />;
     } else {
         const title = widgetType ? widgetType.replace('_', ' ') : 'Structured Analysis';
         content = (

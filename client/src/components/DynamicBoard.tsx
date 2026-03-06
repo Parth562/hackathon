@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import ReactFlow, {
     Background,
     Controls,
@@ -10,43 +10,45 @@ import ReactFlow, {
     Connection,
     Edge,
     Node,
-    applyNodeChanges,
-    NodeChange,
-    ConnectionMode
+    ConnectionMode,
+    Panel,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 
 import GenericWidgetNode from './GenericWidgetNode';
+import VariableNode from './VariableNode';
 
 interface DynamicBoardProps {
     widgets: any[];
     onRemoveWidget: (id: string) => void;
+    sessionId?: string | null;
 }
 
 const nodeTypes = {
     customWidget: GenericWidgetNode,
+    variableNode: VariableNode,
 };
 
 export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardProps) {
-    // Initial nodes/edges state
     const [nodes, setNodes, onNodesChange] = useNodesState([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-    // Sync incoming widgets with ReactFlow nodes
+    // ── Sync incoming widgets → ReactFlow nodes ───────────────────────────
     useEffect(() => {
         setNodes((nds: Node[]) => {
             const currentIds = new Set(nds.map((n) => n.id));
             const newNodes = [...nds];
             let hasChanges = false;
+            let insertionCount = newNodes.length;
 
-            widgets.forEach((w, index) => {
-                // If this widget isn't already a node, add it
+            widgets.forEach((w) => {
                 if (!currentIds.has(w.id)) {
                     hasChanges = true;
-                    // Simple auto-layout: 2 columns 
-                    // x,y logic: (idx % 2 * 600), (floor(idx / 2) * 500)
-                    const x = (index % 2) * 600 + 50;
-                    const y = Math.floor(index / 2) * 500 + 50;
+                    const col = insertionCount % 2;
+                    const row = Math.floor(insertionCount / 2);
+                    const x = col * 620 + 50;
+                    const y = row * 520 + 50;
+                    insertionCount++;
 
                     newNodes.push({
                         id: w.id,
@@ -54,56 +56,131 @@ export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardPr
                         position: { x, y },
                         data: {
                             widgetData: w.data,
-                            onRemove: () => onRemoveWidget(w.id)
+                            onRemove: () => onRemoveWidget(w.id),
                         },
-                        // Default size so the resizer knows where handles start
-                        style: { width: 550, height: 450 },
-                        dragHandle: '.drag-handle', // allow dragging only by header
+                        style: (() => {
+                            if (w.data?.type === 'table') {
+                                const cols = w.data._cols ?? 3;
+                                const rows = w.data._rows ?? 4;
+                                const w_ = Math.min(Math.max(cols * 160, 360), 900);
+                                const h_ = Math.min(Math.max(rows * 42 + 90, 180), 600);
+                                return { width: w_, height: h_ };
+                            }
+                            return { width: 560, height: 460 };
+                        })(),
                     });
                 }
             });
 
-            // If a widget was removed from parent props, remove from nodes
             const incomingIds = new Set(widgets.map((w) => w.id));
             const activeNodes = newNodes.filter((n) => {
-                if (!incomingIds.has(n.id)) {
-                    hasChanges = true;
-                    return false; // remove it
-                }
-                return true; // keep it
+                // Keep variable nodes (added from toolbar, not from widgets prop)
+                if (n.type === 'variableNode') return true;
+                if (!incomingIds.has(n.id)) { hasChanges = true; return false; }
+                return true;
             });
 
             return hasChanges ? activeNodes : nds;
         });
     }, [widgets, onRemoveWidget, setNodes]);
 
-    // Handle node deletion via Backspace/Delete key in ReactFlow
+    // ── Delete node via key ───────────────────────────────────────────────
     const onNodesDelete = useCallback(
         (deleted: any[]) => {
             deleted.forEach((node) => {
-                onRemoveWidget(node.id);
+                if (node.type !== 'variableNode') onRemoveWidget(node.id);
             });
         },
         [onRemoveWidget]
     );
 
-    // Handle user drawing connections between widgets
+    // ── Connect edges + variable sync ────────────────────────────────────
     const onConnect = useCallback(
-        (params: Edge | Connection) => setEdges((eds: Edge[]) => addEdge({ ...params, type: 'smoothstep', animated: true, style: { stroke: 'var(--primary)', strokeWidth: 2 } }, eds)),
-        [setEdges]
+        (params: Edge | Connection) => {
+            setEdges((eds: Edge[]) => addEdge({
+                ...params,
+                type: 'smoothstep',
+                animated: true,
+                style: { stroke: 'var(--primary)', strokeWidth: 2 },
+            }, eds));
+
+            // Variable sync: if both endpoints are variableNodes, mark target as synced
+            // and propagate source value to target
+            setNodes((nds: Node[]) => {
+                const sourceNode = nds.find((n) => n.id === params.source);
+                const targetNode = nds.find((n) => n.id === params.target);
+
+                if (
+                    sourceNode?.type === 'variableNode' &&
+                    targetNode?.type === 'variableNode'
+                ) {
+                    const srcVal = sourceNode.data.variableValue;
+                    const srcName = sourceNode.data.variableName;
+                    return nds.map((n) =>
+                        n.id === targetNode.id
+                            ? { ...n, data: { ...n.data, variableName: srcName, variableValue: srcVal, synced: true } }
+                            : n
+                    );
+                }
+                return nds;
+            });
+        },
+        [setEdges, setNodes]
     );
 
-    if (widgets.length === 0) {
-        return (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#8b949e' }}>
-                <h2 style={{ fontSize: '1.5rem', marginBottom: '8px', color: '#fff' }}>Interactive Canvas</h2>
-                <p>Ask the agent to generate a graph or DCF model, and it will appear here.</p>
-            </div>
-        );
-    }
+    // ── Add Variable node from toolbar ───────────────────────────────────
+    const addVariableNode = useCallback(() => {
+        const id = `var-${Date.now()}`;
+        const newNode: Node = {
+            id,
+            type: 'variableNode',
+            position: { x: 80 + Math.random() * 200, y: 80 + Math.random() * 200 },
+            data: {
+                variableName: 'discount_rate',
+                variableValue: '0.10',
+                synced: false,
+                onChange: (name: string, value: string | number) => {
+                    // Propagate value change to all synced targets via edges
+                    setNodes((nds: Node[]) => nds.map((n) => {
+                        if (n.type === 'variableNode' && n.data.synced && n.data.variableName === name) {
+                            return { ...n, data: { ...n.data, variableValue: value } };
+                        }
+                        return n;
+                    }));
+                },
+            },
+        };
+        setNodes((nds: Node[]) => [...nds, newNode]);
+    }, [setNodes]);
+
+    // ── Empty state ───────────────────────────────────────────────────────
+    const isEmpty = widgets.length === 0 && !nodes.some((n) => n.type === 'variableNode');
 
     return (
-        <div style={{ width: '100%', height: '100%' }}>
+        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+            {isEmpty && (
+                <div style={{
+                    position: 'absolute', inset: 0,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center',
+                    justifyContent: 'center', gap: '12px', color: 'var(--text-muted)',
+                    pointerEvents: 'none',
+                }}>
+                    <div style={{
+                        width: '56px', height: '56px', borderRadius: '16px',
+                        background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '1.8rem',
+                    }}>📊</div>
+                    <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-secondary)', margin: 0 }}>
+                        Interactive Canvas
+                    </h2>
+                    <p style={{ fontSize: '0.85rem', maxWidth: '260px', textAlign: 'center', lineHeight: 1.6 }}>
+                        Ask the agent to analyse stocks, run DCF models, or benchmark peers — widgets appear here.<br />
+                        Use the <strong style={{ color: 'var(--text-secondary)' }}>+ Variable</strong> button to add shared variables.
+                    </p>
+                </div>
+            )}
+
             <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -118,14 +195,53 @@ export default function DynamicBoard({ widgets, onRemoveWidget }: DynamicBoardPr
                 connectionMode={ConnectionMode.Loose}
                 deleteKeyCode={["Backspace", "Delete"]}
                 multiSelectionKeyCode={["Control", "Shift"]}
-                selectionKeyCode={["Shift"]}
                 panOnScroll={true}
                 selectionOnDrag={true}
                 panOnDrag={[1, 2]}
-                fitView
+                fitView={!isEmpty}
             >
-                <Background color="#30363d" gap={20} size={1} />
-                <Controls showInteractive={false} style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px', background: 'rgba(13, 17, 23, 0.8)', border: '1px solid #30363d', borderRadius: '8px' }} />
+                <Background color="#1e2530" gap={24} size={1} />
+                <Controls
+                    showInteractive={false}
+                    style={{
+                        display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px',
+                        background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                    }}
+                />
+
+                {/* Canvas toolbar */}
+                <Panel position="top-right">
+                    <button
+                        onClick={addVariableNode}
+                        title="Add a shared variable panel"
+                        style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: 'var(--bg-elevated)',
+                            border: '1px solid var(--border-default)',
+                            color: 'var(--text-secondary)',
+                            padding: '7px 12px',
+                            borderRadius: 'var(--radius-sm)',
+                            cursor: 'pointer',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                            fontFamily: 'var(--font-base)',
+                            transition: 'all 0.2s ease',
+                        }}
+                        onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)';
+                            (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)';
+                        }}
+                        onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLElement).style.background = 'var(--bg-elevated)';
+                            (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)';
+                        }}
+                    >
+                        <span>🔗</span> + Variable
+                    </button>
+                </Panel>
             </ReactFlow>
         </div>
     );

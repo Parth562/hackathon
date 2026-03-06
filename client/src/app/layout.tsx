@@ -8,7 +8,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "KENT | Executive Dashboard",
+  title: "KEN | Executive Dashboard",
   description: "Dynamic AI Financial Management Board",
 };
 

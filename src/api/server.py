@@ -15,8 +15,12 @@ load_dotenv()
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from src.agent.graph import app as agent_app
+from src.memory.sqlite_store import StructuredStore
 from langchain_core.messages import HumanMessage
 import uuid
+
+# Shared structured data store for sessions, portfolio, etc.
+_store = StructuredStore()
 
 app = FastAPI(title="Financial Research Agent API")
 
@@ -35,8 +39,9 @@ sessions: dict[str, dict] = {}
 class ChatRequest(BaseModel):
     message: str
     session_id: str = None
-    model_name: str = "gemini-2.5-flash"
-    provider: str = "google"
+    model_name: str = "glm-5:cloud"
+    provider: str = "ollama"
+    forced_mode: str = None  # 'QUICK' or 'DEEP' — bypasses triage LLM classification
 
 class ChatResponse(BaseModel):
     response: str
@@ -73,20 +78,20 @@ from langchain_community.document_loaders import PyPDFLoader
 import tempfile
 
 @app.post("/api/upload")
-def upload_document(file: UploadFile = File(...)):
+async def upload_document(file: UploadFile = File(...)):
     """Uploads a company document, extracts text, chunks it, and stores in the FAISS document index."""
     try:
         # Create a temporary file to save the uploaded content
         suffix = os.path.splitext(file.filename)[1]
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            content = file.file.read()
+            content = await file.read()
             tmp.write(content)
             tmp_path = tmp.name
 
         documents = []
         if suffix.lower() == '.pdf':
             loader = PyPDFLoader(tmp_path)
-            documents = loader.load()
+            documents = await asyncio.to_thread(loader.load)
         elif suffix.lower() == '.txt':
             # Simple text parsing
             from langchain_core.documents import Document
@@ -110,7 +115,7 @@ def upload_document(file: UploadFile = File(...)):
         texts = [chunk.page_content for chunk in chunks]
         metadatas = [{"source": file.filename, **(chunk.metadata if chunk.metadata else {})} for chunk in chunks]
         
-        document_store.store_memories_batch(texts, metadatas=metadatas)
+        await asyncio.to_thread(document_store.store_memories_batch, texts, metadatas=metadatas)
             
         os.unlink(tmp_path)
         
@@ -122,11 +127,11 @@ def upload_document(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/documents")
-def get_documents():
+async def get_documents():
     """Returns a list of all uniquely uploaded document filenames from the FAISS index."""
     try:
         from src.tools.document_tools import document_store
-        sources = document_store.get_all_document_sources()
+        sources = await asyncio.to_thread(document_store.get_all_document_sources)
         # Sort for better UX
         sources.sort()
         return {"documents": sources}
@@ -136,11 +141,11 @@ def get_documents():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/documents/{filename}")
-def delete_document(filename: str):
+async def delete_document(filename: str):
     """Deletes all chunks associated with a specific document filename."""
     try:
         from src.tools.document_tools import document_store
-        success = document_store.delete_document_by_source(filename)
+        success = await asyncio.to_thread(document_store.delete_document_by_source, filename)
         if success:
             return {"message": f"Successfully deleted {filename}"}
         else:
@@ -155,11 +160,11 @@ class SimilaritySearchRequest(BaseModel):
     limit: int = 5
 
 @app.post("/api/documents/search")
-def search_documents(request: SimilaritySearchRequest):
+async def search_documents(request: SimilaritySearchRequest):
     """Performs a manual similarity search on the uploaded documents."""
     try:
         from src.tools.document_tools import document_store
-        results = document_store.retrieve_relevant_memories(request.query, limit=request.limit)
+        results = await asyncio.to_thread(document_store.retrieve_relevant_memories, request.query, limit=request.limit)
         
         # Format for frontend
         formatted_results = []
@@ -185,7 +190,6 @@ async def chat_endpoint(request: ChatRequest):
     # Retrieve existing session state or initialize a new one
     if session_id in sessions:
         state = sessions[session_id]
-        # Append new user message to existing history
         state["messages"].append(HumanMessage(content=request.message))
     else:
         state = {
@@ -193,11 +197,15 @@ async def chat_endpoint(request: ChatRequest):
             "session_id": session_id,
             "model_name": request.model_name,
             "provider": request.provider,
+            "forced_mode": request.forced_mode,
             "tools_used": [],
             "assumptions": [],
             "confidence_score": 0.0,
             "detected_contradictions": []
         }
+        # Persist session to DB with the first message as title
+        title = request.message[:60].strip()
+        await asyncio.to_thread(_store.upsert_session, session_id, title)
     
     async def event_generator():
         try:
@@ -211,9 +219,10 @@ async def chat_endpoint(request: ChatRequest):
             async for event_mode, event_payload in agent_app.astream(state, stream_mode=["messages", "updates"]):
                 if event_mode == "messages":
                     chunk, metadata = event_payload
-                    if chunk.type == "ai" and isinstance(chunk.content, str) and chunk.content:
-                        if not getattr(chunk, "tool_calls", None):
-                            yield json.dumps({"type": "token", "content": chunk.content}) + "\n"
+                    if chunk.type == "ai" and isinstance(chunk.content, str) and chunk.content.strip():
+                        # We don't want to yield the raw JSON 'plan' to the user directly as token chunks
+                        # They will just see status updates until the final report
+                        yield json.dumps({"type": "token", "content": chunk.content}) + "\n"
                             
                 elif event_mode == "updates":
                     for node_name, node_state in event_payload.items():
@@ -222,22 +231,19 @@ async def chat_endpoint(request: ChatRequest):
                         if isinstance(node_state, dict):
                             current_state.update(node_state)
                             
-                        if node_name == "triage":
-                            mode = node_state.get('research_mode', 'unknown')
-                            yield json.dumps({"type": "status", "content": f"Triaging request (Mode: {mode})..."}) + "\n"
-                        
-                        elif node_name == "agent":
-                            messages = node_state.get("messages", [])
-                            if messages:
-                                last_msg = messages[-1]
-                                if hasattr(last_msg, 'tool_calls') and last_msg.tool_calls:
-                                    tool_names = [tc.get('name', 'unknown') for tc in last_msg.tool_calls]
-                                    yield json.dumps({"type": "status", "content": f"Executing tools: {', '.join(tool_names)}..."}) + "\n"
-                                else:
-                                    yield json.dumps({"type": "status", "content": "Synthesizing final answer..."}) + "\n"
-                        
-                        elif node_name == "tools":
-                            yield json.dumps({"type": "status", "content": "Processing tool results..."}) + "\n"
+                        # Yield UI status updates based on the current 5-agent pipeline step
+                        if node_name == "planner":
+                            yield json.dumps({"type": "status", "content": "Planner Agent: Formulating research plan..."}) + "\n"
+                        elif node_name == "research":
+                            yield json.dumps({"type": "status", "content": "Research Agent: Scouring the web and documents..."}) + "\n"
+                        elif node_name == "data":
+                            yield json.dumps({"type": "status", "content": "Data Agent: Retrieving hard financial figures..."}) + "\n"
+                        elif node_name == "analysis":
+                            yield json.dumps({"type": "status", "content": "Analysis Agent: Running quantitative models..."}) + "\n"
+                        elif node_name == "critic":
+                            yield json.dumps({"type": "status", "content": "Critic Agent: Verifying reasoning and assessing risks..."}) + "\n"
+                        elif node_name == "report":
+                            yield json.dumps({"type": "status", "content": "Report Agent: Synthesizing final insight..."}) + "\n"
 
             # 3. Final response
             # Instead of relying on the last partial update, we invoke the app once to get the FULL final state
@@ -262,6 +268,14 @@ async def chat_endpoint(request: ChatRequest):
             # Update global session store
             sessions[session_id] = current_state
             
+            # Persist messages for session restore
+            raw_messages = current_state.get("messages", [])
+            serialized = []
+            for m in raw_messages:
+                role = "user" if getattr(m, "type", None) == "human" else "agent"
+                serialized.append({"role": role, "content": m.content})
+            await asyncio.to_thread(_store.save_messages, session_id, serialized)
+            
             mode = current_state.get('research_mode', 'UNKNOWN')
             
             yield json.dumps({
@@ -283,6 +297,84 @@ async def chat_endpoint(request: ChatRequest):
 
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+
+# ── Session Management Endpoints ─────────────────────────────────────────────
+
+@app.get("/api/sessions")
+async def get_sessions():
+    """List all sessions ordered by most recently updated."""
+    try:
+        session_list = await asyncio.to_thread(_store.get_all_sessions)
+        return {"sessions": session_list}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    """Get session metadata + board state."""
+    try:
+        data = await asyncio.to_thread(_store.get_session, session_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class BoardStateRequest(BaseModel):
+    board_state: list
+
+@app.post("/api/sessions/{session_id}/board")
+async def save_board(session_id: str, request: BoardStateRequest):
+    """Persist the board widget state for a session."""
+    try:
+        await asyncio.to_thread(_store.save_board_state, session_id, request.board_state)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session and its history."""
+    try:
+        await asyncio.to_thread(_store.delete_session, session_id)
+        # Also purge from in-memory store
+        sessions.pop(session_id, None)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class AlertRequest(BaseModel):
+    ticker: str
+    condition: str = "negative_fcf"
+
+@app.post("/api/alerts")
+async def check_alerts(request: AlertRequest):
+    """
+    Simple rule-based alert endpoint.
+    """
+    try:
+        from src.tools.finance_tools import get_financial_statements
+        result_json = await asyncio.to_thread(get_financial_statements.invoke, request.ticker)
+        data = json.loads(result_json)
+        
+        alerts = []
+        if request.condition == "negative_fcf":
+            fcf = data.get("free_cash_flow")
+            if fcf is not None and fcf < 0:
+                alerts.append(f"ALERT: {request.ticker} has negative Free Cash Flow: {fcf}")
+            elif fcf is not None:
+                alerts.append(f"OK: {request.ticker} has positive Free Cash Flow: {fcf}")
+            else:
+                alerts.append(f"UNKNOWN: FCF data missing for {request.ticker}")
+                
+        return {"ticker": request.ticker, "alerts": alerts}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

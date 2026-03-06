@@ -1,7 +1,9 @@
 from typing import Dict, Any
 from langchain_core.tools import tool
+from src.memory.redis_cache import sync_cache
 
 @tool
+@sync_cache(ttl_seconds=300)
 def get_stock_price(ticker: str) -> str:
     """
     Get the current stock price and recent market data for a given ticker symbol.
@@ -29,6 +31,7 @@ def get_stock_price(ticker: str) -> str:
         return str({"error": f"Failed to retrieve price for {ticker}: {str(e)}"})
 
 @tool
+@sync_cache(ttl_seconds=86400)
 def get_financial_statements(ticker: str) -> str:
     """
     Get key financial statements (Income Statement, Balance Sheet, Cash Flow) 
@@ -69,6 +72,7 @@ def get_financial_statements(ticker: str) -> str:
         return str({"error": f"Failed to retrieve financials for {ticker}: {str(e)}"})
 
 @tool
+@sync_cache(ttl_seconds=86400)
 def get_key_metrics(ticker: str) -> str:
     """
     Get key financial metrics like PE ratio, ROE, margins, and 
@@ -99,6 +103,7 @@ def get_key_metrics(ticker: str) -> str:
         return str({"error": f"Failed to retrieve metrics for {ticker}: {str(e)}"})
 
 @tool
+@sync_cache(ttl_seconds=300)
 def get_options_data(ticker: str) -> str:
     """
     Get the future options bets (calls and puts) for the upcoming expiration date for a given ticker symbol.

@@ -1,7 +1,7 @@
-# PROJECT DOCUMENTATION - KENT (Financial Research Agent)
+# PROJECT DOCUMENTATION - KEN (Financial Research Agent)
 
 ## 1. Project Overview
-KENT is an AI-powered financial analysis coding agent designed to assist with investment research, market data retrieval, and complex financial modeling. The system architecture is built around a Python/FastAPI/LangGraph backend and a modern Next.js React frontend. It features an intelligent routing system capable of differentiating between "Quick" data retrievals and "Deep" analytical research tasks.
+KEN is an AI-powered financial analysis coding agent designed to assist with investment research, market data retrieval, and complex financial modeling. The system architecture is built around a Python/FastAPI/LangGraph backend and a modern Next.js React frontend. It features an intelligent routing system capable of differentiating between "Quick" data retrievals and "Deep" analytical research tasks.
 
 ## 2. Architecture & Tech Stack
 
