@@ -16,6 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from src.agent.graph import app as agent_app
 from src.memory.sqlite_store import StructuredStore
+from src.tools.canvas_tools import update_canvas_state, pop_pending_actions
 from langchain_core.messages import HumanMessage
 import uuid
 
@@ -140,6 +141,19 @@ async def get_documents():
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/quote/{ticker}")
+async def get_live_quote(ticker: str):
+    """Endpoint for the frontend to poll live stock prices directly, bypassing the LLM."""
+    try:
+        from src.tools.groww_tools import get_live_stock_price_groww
+        # The tool returns a JSON string, so we parse it to send as a proper JSON response
+        result_str = await asyncio.to_thread(get_live_stock_price_groww.invoke, {"ticker": ticker})
+        return json.loads(result_str)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.delete("/api/documents/{filename}")
 async def delete_document(filename: str):
     """Deletes all chunks associated with a specific document filename."""
@@ -183,6 +197,25 @@ async def search_documents(request: SimilaritySearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Canvas State Endpoints ────────────────────────────────────────────────────
+
+class CanvasStateRequest(BaseModel):
+    nodes: list
+    edges: list
+
+@app.post("/api/canvas/{session_id}/state")
+async def push_canvas_state(session_id: str, request: CanvasStateRequest):
+    """Frontend pushes the current node/edge state so the LLM can read it."""
+    await asyncio.to_thread(update_canvas_state, session_id, request.nodes, request.edges)
+    return {"ok": True}
+
+@app.get("/api/canvas/{session_id}/actions")
+async def get_canvas_actions(session_id: str):
+    """Frontend polls this to get any pending LLM-driven canvas actions."""
+    actions = await asyncio.to_thread(pop_pending_actions, session_id)
+    return {"actions": actions}
+
+
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
@@ -210,40 +243,84 @@ async def chat_endpoint(request: ChatRequest):
     async def event_generator():
         try:
             # 1. Yield initial status
-            yield json.dumps({"type": "status", "content": "Initializing agent..."}) + "\n"
+            yield json.dumps({"type": "status", "content": "Routing request..."}) + "\n"
             
-            # Local variable to track state updates
+            # Tracking state updates for final result and persistence
             current_state = state.copy()
             
-            # 2. Iterate through graph updates
-            async for event_mode, event_payload in agent_app.astream(state, stream_mode=["messages", "updates"]):
-                if event_mode == "messages":
-                    chunk, metadata = event_payload
-                    if chunk.type == "ai" and isinstance(chunk.content, str) and chunk.content.strip():
-                        # We don't want to yield the raw JSON 'plan' to the user directly as token chunks
-                        # They will just see status updates until the final report
-                        yield json.dumps({"type": "token", "content": chunk.content}) + "\n"
-                            
-                elif event_mode == "updates":
-                    for node_name, node_state in event_payload.items():
+            # Nodes whose AI output chunks should be streamed to the user as final tokens
+            STREAMING_NODES = {"report", "read_data", "write_data"}
+            
+            import re as _re
+            async for event in agent_app.astream_events(state, version="v2"):
+                kind = event["event"]
+                metadata = event.get("metadata", {})
+                langgraph_node = metadata.get("langgraph_node", "")
+
+                # A. Token Streaming
+                if kind == "on_chat_model_stream":
+                    content = event["data"]["chunk"].content
+                    if content and langgraph_node in STREAMING_NODES:
+                        yield json.dumps({"type": "token", "content": content}) + "\n"
+                    elif content:
+                        yield json.dumps({"type": "thinking", "kind": "reasoning", "content": content}) + "\n"
+
+                # B. Tool Execution
+                elif kind == "on_tool_start":
+                    tool_name = event["name"]
+                    inputs = event["data"].get("input", {})
+                    yield json.dumps({
+                        "type": "thinking", 
+                        "kind": "tool_start", 
+                        "tool": tool_name, 
+                        "input": inputs
+                    }) + "\n"
+                
+                elif kind == "on_tool_end":
+                    tool_name = event["name"]
+                    output = event["data"].get("output", "")
+                    str_output = str(output)[:500] + "..." if len(str(output)) > 500 else str(output)
+                    yield json.dumps({
+                        "type": "thinking", 
+                        "kind": "tool_end", 
+                        "tool": tool_name, 
+                        "output": str_output
+                    }) + "\n"
+
+                # C. Node Status Updates
+                elif kind == "on_chain_start":
+                    name = event["name"]
+                    status_map = {
+                        "intent": "🧭 Understanding your request...",
+                        "read_data": "📊 Fetching data...",
+                        "write_data": "✏️ Updating portfolio...",
+                        "planner": "🗺️ Planner: Formulating research plan...",
+                        "research": "🔍 Research Agent: Scouring the web and documents...",
+                        "data": "📈 Data Agent: Retrieving hard financial figures...",
+                        "analysis": "🧮 Analysis Agent: Running quantitative models...",
+                        "critic": "🔬 Critic Agent: Verifying reasoning and assessing risks...",
+                        "report": "📝 Report Agent: Synthesizing final insight..."
+                    }
+                    if name in status_map:
+                        yield json.dumps({"type": "status", "content": status_map[name]}) + "\n"
+
+                # D. State Updates & Intermediate Widgets
+                elif kind == "on_chain_end":
+                    data = event.get("data", {})
+                    output = data.get("output", {})
+                    
+                    if isinstance(output, dict):
+                        # Update current state tracker
+                        current_state.update(output)
                         
-                        # Update local tracking of state
-                        if isinstance(node_state, dict):
-                            current_state.update(node_state)
-                            
-                        # Yield UI status updates based on the current 5-agent pipeline step
-                        if node_name == "planner":
-                            yield json.dumps({"type": "status", "content": "Planner Agent: Formulating research plan..."}) + "\n"
-                        elif node_name == "research":
-                            yield json.dumps({"type": "status", "content": "Research Agent: Scouring the web and documents..."}) + "\n"
-                        elif node_name == "data":
-                            yield json.dumps({"type": "status", "content": "Data Agent: Retrieving hard financial figures..."}) + "\n"
-                        elif node_name == "analysis":
-                            yield json.dumps({"type": "status", "content": "Analysis Agent: Running quantitative models..."}) + "\n"
-                        elif node_name == "critic":
-                            yield json.dumps({"type": "status", "content": "Critic Agent: Verifying reasoning and assessing risks..."}) + "\n"
-                        elif node_name == "report":
-                            yield json.dumps({"type": "status", "content": "Report Agent: Synthesizing final insight..."}) + "\n"
+                        # Handle widgets
+                        if "intermediate_widgets" in output:
+                            for raw_widget in output["intermediate_widgets"]:
+                                clean_json = _re.sub(r"```widget\n|\n```", "", raw_widget).strip()
+                                try:
+                                    parsed = json.loads(clean_json)
+                                    yield json.dumps({"type": "widget", "content": parsed}) + "\n"
+                                except: pass
 
             # 3. Final response
             # Instead of relying on the last partial update, we invoke the app once to get the FULL final state

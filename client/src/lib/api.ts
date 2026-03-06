@@ -86,3 +86,19 @@ export function streamChat(payload: ChatRequest, signal: AbortSignal) {
         signal,
     });
 }
+
+// ── Canvas State ──────────────────────────────────────
+export async function pushCanvasState(sessionId: string, nodes: unknown[], edges: unknown[]) {
+    await fetch(`${BASE}/api/canvas/${sessionId}/state`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodes, edges }),
+    }).catch(() => { /* ignore network errors silently */ });
+}
+
+export async function pollCanvasActions(sessionId: string): Promise<any[]> {
+    const res = await fetch(`${BASE}/api/canvas/${sessionId}/actions`).catch(() => null);
+    if (!res || !res.ok) return [];
+    const data = await res.json().catch(() => ({ actions: [] }));
+    return data.actions ?? [];
+}

@@ -26,10 +26,23 @@ YOUR INSTRUCTIONS:
     
     try:
         res = await agent.ainvoke({"messages": [SystemMessage(content=full_prompt), HumanMessage(content="Begin your task now. Output a detailed summary of your findings/data.")]})
-        return res['messages'][-1].content
+        final_text = res['messages'][-1].content
+        
+        # Intercept widgets
+        import re
+        widgets = []
+        widget_regex = r"```widget\n([\s\S]*?)```"
+        
+        for match in re.finditer(widget_regex, final_text):
+            widgets.append(match.group(0))
+            
+        # Clean the text so downstream agents don't get confused by the raw JSON
+        cleaned_text = re.sub(widget_regex, "*[Widget extracted and sent to UI]*", final_text)
+        
+        return {"content": cleaned_text, "widgets": widgets}
     except Exception as e:
         print(f"[{name}] Failed: {e}")
-        return f"Failed to execute {name} step."
+        return {"content": f"Failed to execute {name} step.", "widgets": []}
 
 # ==========================================
 # 2. Research Node
@@ -37,12 +50,19 @@ YOUR INSTRUCTIONS:
 async def research_node(state: AgentState) -> AgentState:
     from src.tools.scraping_tools import search_web, scrape_webpage
     from src.tools.document_tools import search_company_documents
+    from src.tools.research_tools import search_pdf_content
     
-    tools = [search_web, scrape_webpage, search_company_documents]
-    prompt = "Gather qualitative info, news, company documents, or context needed to answer the query. Do not do math or pull raw metrics. Focus on narrative, catalysts, and events."
+    tools = [search_web, scrape_webpage, search_company_documents, search_pdf_content]
+    prompt = """Gather qualitative info, news, company documents, or context needed to answer the query.
+For deep analysis, prefer the `search_pdf_content` tool to find institutional reports or official PDF announcements using Google Dorking.
+Do not do math or pull raw metrics. Focus on narrative, catalysts, and events."""
     
     result = await _run_sub_agent(state, "RESEARCH", prompt, tools)
-    return {"research_findings": {"summary": result}}
+    return {
+        "research_findings": {"summary": result["content"]},
+        "intermediate_widgets": result["widgets"]
+    }
+
 
 # ==========================================
 # 3. Data Node
@@ -54,7 +74,10 @@ async def data_node(state: AgentState) -> AgentState:
     prompt = "Fetch EXACT numerical financial data (price, balance sheet, metrics) using your tools. Do not analyze. Just provide the raw verified data requested."
     
     result = await _run_sub_agent(state, "DATA", prompt, tools)
-    return {"financial_data": {"raw": result}}
+    return {
+        "financial_data": {"raw": result["content"]},
+        "intermediate_widgets": result["widgets"]
+    }
 
 # ==========================================
 # 4. Analysis Node
@@ -91,7 +114,10 @@ Use the most relevant combination of tools to answer the user's question:
 Select tools based on what the user actually asked. Do not run every tool — be selective."""
     
     result = await _run_sub_agent(state, "ANALYSIS", prompt, tools)
-    return {"analysis_results": {"findings": result}}
+    return {
+        "analysis_results": {"findings": result["content"]},
+        "intermediate_widgets": result["widgets"]
+    }
 
 # ==========================================
 # 5. Critic Node

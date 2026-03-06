@@ -1,7 +1,8 @@
 "use client";
 
-import React, { memo } from 'react';
-import { Handle, Position, NodeResizer } from 'reactflow';
+import React, { memo, useState } from 'react';
+import { Handle, Position, NodeResizer, useReactFlow, useEdges } from 'reactflow';
+import { Settings } from 'lucide-react';
 import ChartWidget from './ChartWidget';
 import DcfWidget from './DcfWidget';
 import InsiderWidget from './InsiderWidget';
@@ -16,28 +17,77 @@ import RiskScoreWidget from './RiskScoreWidget';
 import ScenarioWidget from './ScenarioWidget';
 import PredictionWidget from './PredictionWidget';
 import TableWidget from './TableWidget';
+import LiveStockWidget from './LiveStockWidget';
+import WidgetSettingsDrawer, { type EdgeBinding } from './WidgetSettingsDrawer';
+import { getSchema, PORT_COLORS, PortDef } from '@/lib/widgetSchema';
 
-// Wrapper component that renders the specific widget based on type
-const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean }) => {
+// ── Port handle strip ─────────────────────────────────────────────────────────
+function PortHandle({ port, side }: { port: PortDef; side: "input" | "output" }) {
+    const position = side === "input" ? Position.Left : Position.Right;
+    const type = side === "input" ? "target" : "source";
+    const color = PORT_COLORS[port.type];
+
+    return (
+        <Handle
+            key={port.id}
+            id={port.id}
+            type={type}
+            position={position}
+            title={`${port.label} (${port.type}): ${port.description}`}
+            style={{
+                width: "12px",
+                height: "12px",
+                borderRadius: "50%",
+                background: color,
+                border: "2.5px solid var(--bg-sidebar)",
+                position: "absolute",
+                [side === "input" ? "left" : "right"]: "-6px",
+            }}
+        />
+    );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolean; id: string }) => {
     const { widgetData, onRemove } = data;
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const edges = useEdges();
+    const { setEdges } = useReactFlow();
 
-    // We lift the border/selection state to this wrapper so the inner widgets don't need to know about reactflow
-    // But we need to handle the resize logic. ReactFlow's NodeResizer handles the interaction, 
-    // we just need to make sure our widget fills the space.
+    const widgetType = widgetData?.widget_type || widgetData?.type || widgetData?.chart_type;
+    const schema = getSchema(widgetType ?? "");
 
-    const widgetType = widgetData.widget_type || widgetData.type || widgetData.chart_type;
+    const inputs = schema?.inputs ?? [];
+    const outputs = schema?.outputs ?? [];
 
-    let content = null;
+    // Build edge binding info for the settings drawer
+    const inputBindings: EdgeBinding[] = edges
+        .filter((e) => e.target === id && e.targetHandle)
+        .map((e) => ({
+            edgeId: e.id,
+            portId: e.targetHandle!,
+            remoteLabel: e.sourceHandle ?? e.source.slice(0, 8),
+        }));
 
-    // Remove logic is passed down, but the node itself is removed via onNodesChange in the parent
-    // The "onClose" prop in our widgets usually triggers onRemoveWidget.
-    // We need to bridge this: specific widget calls onClose -> parent removes node.
+    const outputBindings: EdgeBinding[] = edges
+        .filter((e) => e.source === id && e.sourceHandle)
+        .map((e) => ({
+            edgeId: e.id,
+            portId: e.sourceHandle!,
+            remoteLabel: e.targetHandle ?? e.target.slice(0, 8),
+        }));
+
     const handleClose = (e?: React.MouseEvent) => {
-        if (e) e.stopPropagation(); // prevent node selection when clicking close
+        if (e) e.stopPropagation();
         if (onRemove) onRemove();
     };
 
-    if (widgetData.chart_type || widgetType === 'chart') {
+    const handleDisconnect = (edgeId: string) => {
+        setEdges((eds) => eds.filter((e) => e.id !== edgeId));
+    };
+
+    let content = null;
+    if (widgetData?.chart_type || widgetType === 'chart') {
         content = <ChartWidget data={widgetData} onClose={handleClose} />;
     } else if (widgetType === 'dcf') {
         content = <DcfWidget data={widgetData} onClose={handleClose} />;
@@ -65,6 +115,8 @@ const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean })
         content = <PredictionWidget data={widgetData} onClose={handleClose} />;
     } else if (widgetType === 'table') {
         content = <TableWidget data={widgetData} onClose={handleClose} />;
+    } else if (widgetType === 'live_stock') {
+        content = <LiveStockWidget data={widgetData} onClose={handleClose} />;
     } else {
         const title = widgetType ? widgetType.replace('_', ' ') : 'Structured Analysis';
         content = (
@@ -95,21 +147,91 @@ const GenericWidgetNode = ({ data, selected }: { data: any, selected: boolean })
                 lineStyle={{ border: '2px dashed var(--accent)' }}
             />
 
+            {/* ⚙️ Settings button — top right corner of node */}
+            <button
+                title="Widget Settings"
+                onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
+                style={{
+                    position: "absolute", top: "8px", right: "8px",
+                    zIndex: 200,
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--border-subtle)",
+                    borderRadius: "6px",
+                    padding: "4px",
+                    cursor: "pointer",
+                    color: "var(--text-muted)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    opacity: selected ? 1 : 0,
+                    transition: "opacity 0.15s, color 0.15s",
+                    pointerEvents: selected ? "all" : "none",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--primary)")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
+            >
+                <Settings size={13} />
+            </button>
+
+            {/* ↙ Input handles (left side) */}
+            {inputs.map((port, i) => {
+                const totalPorts = inputs.length;
+                const pct = totalPorts === 1 ? 50 : 20 + (60 / (totalPorts - 1)) * i;
+                return (
+                    <Handle
+                        key={port.id}
+                        id={port.id}
+                        type="target"
+                        position={Position.Left}
+                        title={`${port.label} (${port.type}): ${port.description}`}
+                        style={{
+                            width: "12px", height: "12px",
+                            borderRadius: "50%",
+                            background: PORT_COLORS[port.type],
+                            border: "2.5px solid var(--bg-sidebar)",
+                            top: `${pct}%`,
+                        }}
+                    />
+                );
+            })}
+
+            {/* ↗ Output handles (right side) */}
+            {outputs.map((port, i) => {
+                const totalPorts = outputs.length;
+                const pct = totalPorts === 1 ? 50 : 20 + (60 / (totalPorts - 1)) * i;
+                return (
+                    <Handle
+                        key={port.id}
+                        id={port.id}
+                        type="source"
+                        position={Position.Right}
+                        title={`${port.label} (${port.type}): ${port.description}`}
+                        style={{
+                            width: "12px", height: "12px",
+                            borderRadius: "50%",
+                            background: PORT_COLORS[port.type],
+                            border: "2.5px solid var(--bg-sidebar)",
+                            top: `${pct}%`,
+                        }}
+                    />
+                );
+            })}
+
+            {/* Main widget content */}
             <div style={{ height: '100%', width: '100%', overflow: 'hidden' }}>
                 {content}
             </div>
-            <Handle
-                type="target"
-                position={Position.Left}
-                id="target-handle"
-                style={{ width: '8px', height: '40px', background: 'var(--primary)', borderRadius: '4px', border: '2px solid rgba(255,255,255,0.4)', left: '-4px' }}
-            />
-            <Handle
-                type="source"
-                position={Position.Right}
-                id="source-handle"
-                style={{ width: '8px', height: '40px', background: 'var(--accent)', borderRadius: '4px', border: '2px solid rgba(255,255,255,0.4)', right: '-4px' }}
-            />
+
+            {/* Settings Drawer */}
+            {settingsOpen && (
+                <WidgetSettingsDrawer
+                    widgetLabel={schema?.displayName ?? widgetType ?? "Widget"}
+                    inputs={inputs}
+                    outputs={outputs}
+                    inputBindings={inputBindings}
+                    outputBindings={outputBindings}
+                    onDisconnect={handleDisconnect}
+                    onClose={() => setSettingsOpen(false)}
+                />
+            )}
         </div>
     );
 };

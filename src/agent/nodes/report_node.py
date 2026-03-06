@@ -1,7 +1,8 @@
 from langchain_core.messages import SystemMessage, AIMessage
+from langchain_core.runnables.config import RunnableConfig
 from src.agent.state import AgentState
 
-async def report_node(state: AgentState) -> AgentState:
+async def report_node(state: AgentState, config: RunnableConfig) -> AgentState:
     """
     Step 6: The Report Agent.
     Takes the structured findings from Research, Data, Analysis, and Critic.
@@ -41,13 +42,12 @@ PIPELINE EXECUTION PLAN:
 INSTRUCTIONS:
 - Write a clear, structured markdown response directly answering the user's query.
 - Emphasize the Critic's feedback regarding risks and assumptions.
-- If the Data or Analysis agents generated any UI widgets (JSON blocks with ```widget), PASS THEM THROUGH exactly as they are so the frontend can render them.
 - Be concise but comprehensive. Use bolding and bullet points for readability.
 - Do NOT hallucinate any numbers. Only use the numbers provided in the Data and Analysis sections.
 """
     
     try:
-        res = await llm.ainvoke([SystemMessage(content=system_prompt)])
+        res = await llm.ainvoke([SystemMessage(content=system_prompt)], config=config)
         
         # We append the final response to the message history so the frontend sees it
         new_messages = list(state.get("messages", []))

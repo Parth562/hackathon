@@ -24,3 +24,5 @@ statsmodels
 mplfinance
 matplotlib
 python-multipart
+growwapi
+pyotp

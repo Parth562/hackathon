@@ -4,7 +4,7 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import SessionSidebar from "@/components/SessionSidebar";
 import ChatInterface from "@/components/ChatInterface";
-import { fetchSession, saveBoardState } from "@/lib/api";
+import { fetchSession, saveBoardState, pushCanvasState, pollCanvasActions } from "@/lib/api";
 
 const DynamicBoard = dynamic(() => import("@/components/DynamicBoard"), { ssr: false });
 
@@ -35,7 +35,12 @@ export default function Home() {
     // Explicit session selection from sidebar — load persisted board + messages
     fetchSession(activeSessionId)
       .then((s) => {
-        setWidgets(s.board_state ?? []);
+        // Each persisted board item is raw widget data — re-wrap with an id
+        const restored = (s.board_state ?? []).map((item: any, i: number) => ({
+          id: item._widgetId ?? `restored-${Date.now()}-${i}`,
+          data: item,
+        }));
+        setWidgets(restored);
         setRestoredMessages(s.messages ?? []);
       })
       .catch(() => { setWidgets([]); setRestoredMessages([]); });
@@ -53,7 +58,8 @@ export default function Home() {
 
   const handleNewWidget = useCallback((widgetData: any) => {
     setWidgets((prev) => {
-      const next = [{ id: Date.now().toString() + Math.random(), data: widgetData }, ...prev];
+      const newId = Date.now().toString() + "-" + Math.floor(Math.random() * 1e6);
+      const next = [{ id: newId, data: { ...widgetData, _widgetId: newId } }, ...prev];
       persistBoard(next);
       return next;
     });
@@ -67,10 +73,69 @@ export default function Home() {
     });
   }, [persistBoard]);
 
+  // ── LLM Canvas Action Polling ──────────────────────────
+  // Expose a setter so DynamicBoard's edges can be updated from the outside
+  const [pendingCanvasActions, setPendingCanvasActions] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!activeSessionId) return;
+    const interval = setInterval(async () => {
+      const actions = await pollCanvasActions(activeSessionId);
+      if (actions.length > 0) setPendingCanvasActions((prev) => [...prev, ...actions]);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [activeSessionId]);
+
+  // Push canvas state to backend whenever session is active (debounced via save timer)
+  useEffect(() => {
+    if (!activeSessionId || widgets.length === 0) return;
+    // Push lightweight summary (just id + widget_type) for LLM context
+    const nodesSummary = widgets.map((w) => ({
+      id: w.id,
+      type: "customWidget",
+      data: { widgetData: { type: w.data?.type, widget_type: w.data?.widget_type, ticker: w.data?.ticker } },
+    }));
+    pushCanvasState(activeSessionId, nodesSummary, []);
+  }, [widgets, activeSessionId]);
+
   const handleNewChat = () => {
     setActiveSessionId(null);
     setWidgets([]);
     setRestoredMessages(null);
+  };
+
+  // ── Resizable Chat Panel ─────────────────────────
+  const [chatWidth, setChatWidth] = useState(380);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const newWidth = document.body.clientWidth - e.clientX;
+      if (newWidth >= 300 && newWidth <= 800) {
+        setChatWidth(newWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isDraggingRef.current) {
+        isDraggingRef.current = false;
+        document.body.style.cursor = "";
+      }
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  const handleDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    document.body.style.cursor = "col-resize";
   };
 
   return (
@@ -92,13 +157,29 @@ export default function Home() {
           widgets={widgets}
           onRemoveWidget={removeWidget}
           sessionId={activeSessionId}
+          pendingActions={pendingCanvasActions}
+          onActionsConsumed={() => setPendingCanvasActions([])}
         />
       </div>
 
+      {/* ── Drag Handle ─────────────────────────────────── */}
+      <div
+        onMouseDown={handleDragStart}
+        style={{
+          width: "4px",
+          cursor: "col-resize",
+          background: "transparent",
+          zIndex: 10,
+          transition: "background 0.2s",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--primary)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      />
+
       {/* ── Chat Panel ─────────────────────────────────── */}
       <div style={{
-        width: "380px",
-        minWidth: "340px",
+        width: `${chatWidth}px`,
+        minWidth: "300px",
         height: "100%",
         borderLeft: "1px solid var(--border-subtle)",
         display: "flex",

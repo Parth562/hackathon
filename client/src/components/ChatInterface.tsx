@@ -19,6 +19,7 @@ interface Message {
     role: "user" | "agent";
     content: string;
     status?: "queued" | "processing" | "stopped" | "completed";
+    thinking?: any[];
 }
 
 interface Props {
@@ -31,6 +32,86 @@ interface Props {
 const PREF_MODEL_KEY = "KEN_model_pref";
 const PREF_MODE_KEY = "KEN_mode_pref";
 
+// ── Components ────────────────────────────────────────
+
+const ThinkingLog = ({ events }: { events: any[] }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+    if (!events || events.length === 0) return null;
+
+    return (
+        <div style={{
+            marginTop: "10px",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-md)",
+            overflow: "hidden",
+            background: "rgba(0,0,0,0.2)",
+            backdropFilter: "blur(4px)",
+        }}>
+            <button
+                type="button"
+                onClick={() => setIsExpanded(!isExpanded)}
+                style={{
+                    width: "100%", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between",
+                    background: "transparent", border: "none", color: "var(--text-secondary)", fontSize: "0.7rem",
+                    fontWeight: 600, cursor: "pointer",
+                }}
+            >
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Search size={12} style={{ opacity: 0.7 }} />
+                    INTERNAL LOG ({events.length} STEPS)
+                </div>
+                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            {isExpanded && (
+                <div style={{
+                    padding: "10px 12px", borderTop: "1px solid var(--border-subtle)",
+                    maxHeight: "350px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px",
+                    background: "rgba(0,0,0,0.1)",
+                }}>
+                    {events.map((ev, i) => (
+                        <div key={i} style={{ fontSize: "0.75rem", lineHeight: 1.5 }}>
+                            {ev.kind === "tool_start" && (
+                                <div style={{ color: "var(--primary)", fontWeight: 500 }}>
+                                    <span style={{ marginRight: "6px" }}>🛠️</span>
+                                    Calling: <code style={{ color: "var(--text-primary)", background: "rgba(255,255,255,0.05)", padding: "2px 4px", borderRadius: "3px" }}>{ev.tool}</code>
+                                    <pre style={{
+                                        fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "6px",
+                                        padding: "8px", background: "rgba(0,0,0,0.2)", borderRadius: "4px",
+                                        overflowX: "auto", border: "1px solid rgba(255,255,255,0.03)"
+                                    }}>
+                                        {JSON.stringify(ev.input, null, 2)}
+                                    </pre>
+                                </div>
+                            )}
+                            {ev.kind === "tool_end" && (
+                                <div style={{ color: "#4ade80", fontWeight: 500 }}>
+                                    <span style={{ marginRight: "6px" }}>✅</span>
+                                    Finished: <code style={{ color: "var(--text-primary)", background: "rgba(255,255,255,0.05)", padding: "2px 4px", borderRadius: "3px" }}>{ev.tool}</code>
+                                    <pre style={{
+                                        fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "6px",
+                                        padding: "8px", background: "rgba(0,0,0,0.2)", borderRadius: "4px",
+                                        maxHeight: "150px", overflowY: "auto", whiteSpace: "pre-wrap",
+                                        border: "1px solid rgba(255,255,255,0.03)"
+                                    }}>
+                                        {ev.output}
+                                    </pre>
+                                </div>
+                            )}
+                            {ev.kind === "reasoning" && (
+                                <div style={{ fontStyle: "italic", color: "var(--text-muted)", display: "flex", gap: "6px" }}>
+                                    <span style={{ opacity: 0.6 }}>💭</span>
+                                    <span style={{ flex: 1 }}>{ev.content}</span>
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+};
+
+
 // ── ChatInterface ─────────────────────────────────────
 export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated, restoredMessages }: Props) {
     const [messages, setMessages] = useState<Message[]>([]);
@@ -38,6 +119,8 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
     const [loading, setLoading] = useState(false);
     const [queue, setQueue] = useState<string[]>([]);
     const [statusMsg, setStatusMsg] = useState("Thinking...");
+    // Rolling 2-line typewriter preview of LLM tokens shown in the status area
+    const [tokenPreviewLines, setTokenPreviewLines] = useState<string[]>([]);
     const [activeTab, setActiveTab] = useState<"chat" | "library">("chat");
     const [mode, setMode] = useState<ResearchMode>(() => {
         if (typeof window !== "undefined") return (localStorage.getItem(PREF_MODE_KEY) as ResearchMode) ?? "QUICK";
@@ -225,11 +308,24 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
 
                     if (event.type === "status") {
                         setStatusMsg(event.content);
+                    } else if (event.type === "widget") {
+                        // Intermediate widget received mid-stream! Instantly render it.
+                        onNewWidget(event.content);
                     } else if (event.type === "token") {
                         finalContent += event.content;
-                        const tokenContent = finalContent; // capture current value for closure
+                        const tokenContent = finalContent;
+
+                        // -- Rolling 2-line preview in the status bar --
+                        // Split accumulated content into trimmed non-empty lines,
+                        // keep the last 2 for the status preview.
+                        const allLines = tokenContent
+                            .split("\n")
+                            .map((l: string) => l.trim())
+                            .filter((l: string) => l.length > 0);
+                        const preview = allLines.slice(-2);
+                        setTokenPreviewLines(preview);
+
                         if (!agentMsgId) {
-                            // Create the agent bubble once
                             const newId = Date.now().toString() + "agent";
                             agentMsgId = newId;
                             setMessages((prev) => [
@@ -237,7 +333,6 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                                 { id: newId, role: "agent" as const, content: tokenContent },
                             ]);
                         } else {
-                            // Update existing bubble by id (not by lastIndexOf, which is fragile)
                             const capturedId = agentMsgId;
                             setMessages((prev) =>
                                 prev.map((m) => m.id === capturedId ? { ...m, content: tokenContent } : m)
@@ -245,10 +340,31 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                         }
                     } else if (event.type === "result") {
                         finalContent = event.response;
-                        // Defer session creation until AFTER stream completes
+                        setTokenPreviewLines([]);
                         if (event.session_id) createdSessionId = event.session_id;
+                        if (agentMsgId) {
+                            const capturedId = agentMsgId;
+                            setMessages((prev) =>
+                                prev.map((m) => m.id === capturedId ? { ...m, content: finalContent } : m)
+                            );
+                        }
+                    } else if (event.type === "thinking") {
+                        if (!agentMsgId) {
+                            const newId = Date.now().toString() + "agent";
+                            agentMsgId = newId;
+                            setMessages((prev) => [
+                                ...prev,
+                                { id: newId, role: "agent" as const, content: "", thinking: [event] },
+                            ]);
+                        } else {
+                            const capturedId = agentMsgId;
+                            setMessages((prev) =>
+                                prev.map((m) => m.id === capturedId ? { ...m, thinking: [...(m.thinking || []), event] } : m)
+                            );
+                        }
                     } else if (event.type === "error") {
                         finalContent = "⚠️ " + event.content;
+                        setTokenPreviewLines([]);
                     }
                 }
             }
@@ -340,6 +456,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
             }
         } finally {
             setLoading(false);
+            setTokenPreviewLines([]);
             abortRef.current = null;
         }
     }, [sessionId, selectedModelId, currentProvider, mode, onNewWidget, onSessionCreated]);
@@ -542,18 +659,23 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                                     : "var(--shadow-sm)",
                             }}>
                                 {msg.role === "agent" ? (
-                                    <div className="markdown-body">
-                                        <ReactMarkdown
-                                            remarkPlugins={[remarkGfm]}
-                                            components={{
-                                                table: ({ children }) => (
-                                                    <div className="md-table-wrap">
-                                                        <table>{children}</table>
-                                                    </div>
-                                                ),
-                                            }}
-                                        >{msg.content}</ReactMarkdown>
-                                    </div>
+                                    <>
+                                        <div className="markdown-body">
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkGfm]}
+                                                components={{
+                                                    table: ({ children }) => (
+                                                        <div className="md-table-wrap">
+                                                            <table>{children}</table>
+                                                        </div>
+                                                    ),
+                                                }}
+                                            >{msg.content}</ReactMarkdown>
+                                        </div>
+                                        {msg.thinking && msg.thinking.length > 0 && (
+                                            <ThinkingLog events={msg.thinking} />
+                                        )}
+                                    </>
                                 ) : (
                                     <span>{msg.content}</span>
                                 )}
@@ -574,13 +696,76 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
 
                     {loading && (
                         <div style={{
-                            alignSelf: "flex-start", display: "flex", alignItems: "center", gap: "10px",
-                            padding: "10px 14px", background: "var(--bg-elevated)",
+                            alignSelf: "flex-start",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "6px",
+                            padding: "10px 14px",
+                            background: "var(--bg-elevated)",
                             borderRadius: "4px var(--radius-md) var(--radius-md) var(--radius-md)",
-                            border: "1px solid var(--border-subtle)", boxShadow: "var(--shadow-sm)",
+                            border: "1px solid var(--border-subtle)",
+                            boxShadow: "var(--shadow-sm)",
+                            maxWidth: "88%",
+                            minWidth: "200px",
                         }}>
-                            <StatusDot color="var(--primary)" pulse />
-                            <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)" }}>{statusMsg}</span>
+                            {/* Stage label row */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                <StatusDot color="var(--primary)" pulse />
+                                <span style={{
+                                    fontSize: "0.75rem",
+                                    fontWeight: 600,
+                                    color: "var(--text-muted)",
+                                    letterSpacing: "0.04em",
+                                    textTransform: "uppercase",
+                                }}>
+                                    {statusMsg}
+                                </span>
+                            </div>
+
+                            {/* Rolling 2-line token preview */}
+                            {tokenPreviewLines.length > 0 && (
+                                <div style={{
+                                    borderTop: "1px solid var(--border-subtle)",
+                                    paddingTop: "6px",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "2px",
+                                    overflow: "hidden",
+                                }}>
+                                    {tokenPreviewLines.map((line, i) => (
+                                        <div
+                                            key={i}
+                                            style={{
+                                                fontSize: "0.8rem",
+                                                lineHeight: 1.55,
+                                                color: i === tokenPreviewLines.length - 1
+                                                    ? "var(--text-primary)"
+                                                    : "var(--text-muted)",
+                                                opacity: i === tokenPreviewLines.length - 1 ? 1 : 0.55,
+                                                fontFamily: "var(--font-base)",
+                                                whiteSpace: "nowrap",
+                                                overflow: "hidden",
+                                                textOverflow: "ellipsis",
+                                                maxWidth: "340px",
+                                                animation: "fadeIn 0.1s ease",
+                                            }}
+                                        >
+                                            {line}
+                                        </div>
+                                    ))}
+                                    {/* blinking cursor on the last line */}
+                                    <span style={{
+                                        display: "inline-block",
+                                        width: "7px",
+                                        height: "13px",
+                                        background: "var(--primary)",
+                                        borderRadius: "1px",
+                                        animation: "pulse-dot 0.9s ease-in-out infinite",
+                                        verticalAlign: "middle",
+                                        marginTop: "2px",
+                                    }} />
+                                </div>
+                            )}
                         </div>
                     )}
 

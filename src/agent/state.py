@@ -1,4 +1,5 @@
 from typing import Annotated, Dict, Any, List, Optional
+import operator
 from typing_extensions import TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -36,6 +37,9 @@ class AgentState(TypedDict):
     financial_data: Optional[Dict]            # Populated by Data Agent
     analysis_results: Optional[Dict]          # Populated by Analysis Agent
     critic_feedback: Optional[str]            # Populated by Critic Agent
+    
+    # Intermediate widgets intercepted mid-flight for UI streaming
+    intermediate_widgets: Annotated[List[str], operator.add]
     
     # Track which tools have run to avoid infinite loops or budget blows
     tools_used: List[str]

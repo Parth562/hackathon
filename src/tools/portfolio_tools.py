@@ -181,7 +181,8 @@ def analyze_portfolio(file_path: str = "default") -> str:
 @tool
 def update_portfolio(action: str, ticker: str, shares: float, cost_basis: float = 0.0) -> str:
     """
-    Directly manage the user's saved portfolio holdings in the database.
+    Directly manage the user's saved portfolio financial holdings in the database.
+    DO NOT use this tool if the user wants to "add" a widget, diagram, or chart to their canvas. This is ONLY for financial accounting.
     Actions allowed: 'add', 'remove', 'set'.
       - 'add' increases the current share count for the ticker by the given amount.
       - 'remove' decreases the current share count.

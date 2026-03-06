@@ -17,7 +17,8 @@ from langchain_core.tools import tool
 
 # Local imports
 from .state import AgentState
-from src.tools.finance_tools import get_stock_price, get_financial_statements, get_key_metrics, get_options_data
+from src.tools.finance_tools import get_financial_statements, get_key_metrics, get_options_data
+from src.tools.groww_tools import get_live_stock_price_groww, show_live_stock_widget
 from src.tools.scraping_tools import search_web, scrape_webpage
 from src.tools.analysis_tools import calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading, calculate_dcf, create_custom_widget, analyze_supply_chain_impact
 from src.tools.graphing_tools import render_stock_comparison_graph, render_advanced_stock_graph
@@ -33,6 +34,7 @@ from src.tools.ml_analysis_tools import (
 )
 from src.memory.vector_store import MemoryManager
 from src.memory.sqlite_store import StructuredStore
+from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets
 
 # Initialize memory stores lazily to prevent PyTorch OOM on import
 _memory_manager_instance = None
@@ -46,7 +48,8 @@ structured_store = StructuredStore()
 
 # Define tools
 tools = [
-     get_stock_price, 
+     get_live_stock_price_groww,
+     show_live_stock_widget,
      get_financial_statements, 
      get_key_metrics, 
      search_web, 
@@ -76,6 +79,11 @@ tools = [
      forecast_price_prophet,
      get_technical_indicators,
      detect_bollinger_breakout,
+     # Canvas control tools
+     get_canvas_state,
+     set_canvas_variable,
+     connect_canvas_widgets,
+     disconnect_canvas_widgets,
 ]
 
 # Dynamic LLM Loader
