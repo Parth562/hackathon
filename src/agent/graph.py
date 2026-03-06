@@ -81,20 +81,40 @@ def get_llm(state: AgentState = None):
         # provider = state.get('provider', provider) or provider
          
     # Force ollama
-    return ChatOllama(model=model_name, temperature=0.1, streaming=True, base_url="http://localhost:11434")
+    return ChatOllama(model=model_name, temperature=0.0, streaming=True, base_url="http://localhost:11434")
 
 from src.agent.nodes.planner_node import planner_node
 from src.agent.nodes.worker_nodes import research_node, data_node, analysis_node, critic_node
 from src.agent.nodes.report_node import report_node
+from src.agent.nodes.intent_node import intent_node
+from src.agent.nodes.quick_nodes import read_data_node, write_data_node
+
+def route_query(state: AgentState) -> str:
+    """Routes the graph based on the Intent Classifier output."""
+    intent = state.get("intent", "RESEARCH")
+    
+    if intent == "READ_DATA":
+        return "read_data"
+    elif intent == "WRITE_DATA":
+        return "write_data"
+    elif intent == "ANALYSIS":
+        return "analysis"
+    else:
+        # Default to full pipeline starting with planner
+        return "planner"
 
 def create_agent_graph() -> StateGraph:
     """
-    Builds the 5-Agent Pipeline Architecture:
-    Planner -> Research -> Data -> Analysis -> Critic -> Report
+    Builds the 4-Tier Agent Pipeline Architecture:
+    Intent Routing -> (Quick/Direct Nodes OR Analysis OR Full Planner/Research)
     """
     builder = StateGraph(AgentState)
     
     # 1. Add all single-responsibility agent nodes
+    builder.add_node("intent", intent_node)
+    builder.add_node("read_data", read_data_node)
+    builder.add_node("write_data", write_data_node)
+    
     builder.add_node("planner",  planner_node)
     builder.add_node("research", research_node)
     builder.add_node("data",     data_node)
@@ -102,18 +122,38 @@ def create_agent_graph() -> StateGraph:
     builder.add_node("critic",   critic_node)
     builder.add_node("report",   report_node)
     
-    # 2. Define the Entry Point
-    builder.set_entry_point("planner")
+    # 2. Define the Entry Point as the Intent Classifier
+    builder.set_entry_point("intent")
     
-    # 3. Connect them sequentially
+    # 3. Add Conditional Routing from Intent Node
+    builder.add_conditional_edges(
+        "intent",
+        route_query,
+        {
+            "read_data": "read_data",
+            "write_data": "write_data",
+            "analysis": "analysis",
+            "planner": "planner"
+        }
+    )
+    
+    # 4. Connect quick nodes directly to END
+    builder.add_edge("read_data", END)
+    builder.add_edge("write_data", END)
+    
+    # ANALYSIS route short-circuits planner/research/data
+    builder.add_edge("analysis", "critic")
+    
+    # RESEARCH route goes through the full deep pipeline
     builder.add_edge("planner",  "research")
     builder.add_edge("research", "data")
     builder.add_edge("data",     "analysis")
-    builder.add_edge("analysis", "critic")
+    
+    # Standard tail for deep paths
     builder.add_edge("critic",   "report")
     builder.add_edge("report",   END)
     
-    # 4. Compile graph
+    # 5. Compile graph
     return builder.compile()
 
 # Export the compiled graph instance

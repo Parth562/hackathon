@@ -23,6 +23,9 @@ class AgentState(TypedDict):
     # Quick mode vs Deep mode determination
     research_mode: Optional[str] 
     
+    # 4-tier routing intent: READ_DATA, WRITE_DATA, ANALYSIS, RESEARCH
+    intent: Optional[str] 
+    
     # Model tracking
     model_name: Optional[str]
     provider: Optional[str]

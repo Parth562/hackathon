@@ -21,4 +21,4 @@ rank_bm25
 scikit-learn
 prophet
 statsmodels
-yfinance --upgrade
+yfinance
