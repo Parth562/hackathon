@@ -21,4 +21,6 @@ rank_bm25
 scikit-learn
 prophet
 statsmodels
-yfinance
+mplfinance
+matplotlib
+python-multipart

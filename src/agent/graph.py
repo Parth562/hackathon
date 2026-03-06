@@ -1,4 +1,11 @@
 import os
+import certifi
+
+# Fix SSL_CERT_FILE if it points to a non-existent path (common in multi-python environments)
+ssl_cert_file = os.environ.get("SSL_CERT_FILE")
+if ssl_cert_file and not os.path.exists(ssl_cert_file):
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+
 import asyncio
 from typing import Dict, Any
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
