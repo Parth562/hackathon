@@ -3,7 +3,7 @@
 import React from 'react';
 import { Briefcase, AlertTriangle, TrendingUp, TrendingDown, PieChart } from 'lucide-react';
 
-export default function PortfolioWidget({ data, onClose }: { data: any; onClose: () => void }) {
+export default function PortfolioWidget({ data, onClose, onOutputChange }: { data: any; onClose: () => void; onOutputChange?: (updates: Record<string, any>) => void }) {
     if (data.error || !data.summary || !data.holdings) {
         return (
             <div className="glass-panel" style={{ position: 'relative', animation: 'fadeIn 0.5s ease-out' }}>
@@ -15,6 +15,18 @@ export default function PortfolioWidget({ data, onClose }: { data: any; onClose:
     }
 
     const { summary, holdings, sectors, alerts } = data;
+
+    React.useEffect(() => {
+        if (onOutputChange && summary) {
+            const updates: Record<string, any> = { 'total-value': summary.total_value };
+            if (holdings && holdings.length > 0) {
+                // sort holdings by weight to find top holding
+                const sorted = [...holdings].sort((a, b) => b.weight_pct - a.weight_pct);
+                updates['top-holding'] = sorted[0].ticker;
+            }
+            onOutputChange(updates);
+        }
+    }, [summary, holdings, onOutputChange]);
 
     return (
         <div className="glass-panel" style={{ position: 'relative', animation: 'fadeIn 0.5s ease-out' }}>

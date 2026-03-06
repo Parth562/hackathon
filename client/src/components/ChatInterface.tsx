@@ -36,6 +36,25 @@ const PREF_MODE_KEY = "KEN_mode_pref";
 
 const ThinkingLog = ({ events }: { events: any[] }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+
+    // Group reasoning tokens together so they don't spawn thousands of individual divs
+    const groupedEvents = React.useMemo(() => {
+        const groups: any[] = [];
+        for (const ev of events) {
+            if (ev.kind === "reasoning") {
+                const last = groups[groups.length - 1];
+                if (last && last.kind === "reasoning") {
+                    last.content += ev.content;
+                } else {
+                    groups.push({ ...ev });
+                }
+            } else {
+                groups.push(ev);
+            }
+        }
+        return groups;
+    }, [events]);
+
     if (!events || events.length === 0) return null;
 
     return (
@@ -68,7 +87,7 @@ const ThinkingLog = ({ events }: { events: any[] }) => {
                     maxHeight: "350px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px",
                     background: "rgba(0,0,0,0.1)",
                 }}>
-                    {events.map((ev, i) => (
+                    {groupedEvents.map((ev, i) => (
                         <div key={i} style={{ fontSize: "0.75rem", lineHeight: 1.5 }}>
                             {ev.kind === "tool_start" && (
                                 <div style={{ color: "var(--primary)", fontWeight: 500 }}>
@@ -98,10 +117,12 @@ const ThinkingLog = ({ events }: { events: any[] }) => {
                                 </div>
                             )}
                             {ev.kind === "reasoning" && (
-                                <div style={{ fontStyle: "italic", color: "var(--text-muted)", display: "flex", gap: "6px" }}>
-                                    <span style={{ opacity: 0.6 }}>💭</span>
-                                    <span style={{ flex: 1 }}>{ev.content}</span>
-                                </div>
+                                <span style={{
+                                    display: 'inline-block',
+                                    whiteSpace: 'pre-wrap',
+                                    wordBreak: 'break-word',
+                                    color: 'var(--text-secondary)'
+                                }}>{ev.content}</span>
                             )}
                         </div>
                     ))}

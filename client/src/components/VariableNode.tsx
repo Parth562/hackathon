@@ -6,18 +6,23 @@
  */
 import React, { memo, useCallback } from "react";
 import { Handle, Position, NodeProps, useReactFlow } from "reactflow";
-import { Variable as VariableIcon } from "lucide-react";
+import { Variable as VariableIcon, Trash2 } from "lucide-react";
 
 export interface VariableNodeData {
     variableName: string;
-    variableValue: string | number;
+    variableValue: any;      // can be string, number, or object/array
     synced?: boolean;       // true if this node is a sync target
-    onChange?: (name: string, value: string | number) => void;
+    onChange?: (name: string, value: any) => void;
 }
 
 function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
     const { variableName, variableValue, synced, onChange } = data;
-    const { setNodes } = useReactFlow();
+    const { setNodes, setEdges } = useReactFlow();
+
+    const handleDelete = useCallback(() => {
+        setNodes((nodes) => nodes.filter(n => n.id !== id));
+        setEdges((edges) => edges.filter(e => e.source !== id && e.target !== id));
+    }, [id, setNodes, setEdges]);
 
     const handleNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const newName = e.target.value;
@@ -26,9 +31,9 @@ function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
         );
     }, [id, setNodes]);
 
-    const handleValueChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleValueChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) => {
         const raw = e.target.value;
-        const newValue = isNaN(Number(raw)) ? raw : Number(raw);
+        const newValue: any = isNaN(Number(raw)) ? raw : Number(raw);
         setNodes((nodes) =>
             nodes.map((n) => n.id === id ? { ...n, data: { ...n.data, variableValue: newValue } } : n)
         );
@@ -66,6 +71,7 @@ function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
                 }}>
                     Variable
                 </span>
+
                 {synced && (
                     <span style={{
                         marginLeft: "auto", fontSize: "0.65rem", fontWeight: 700,
@@ -75,6 +81,17 @@ function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
                         SYNCED
                     </span>
                 )}
+                <button
+                    onClick={handleDelete}
+                    style={{
+                        marginLeft: synced ? "6px" : "auto", background: "transparent",
+                        border: "none", color: "var(--text-muted)", cursor: "pointer",
+                        padding: "2px", display: "flex", alignItems: "center"
+                    }}
+                    title="Delete Variable"
+                >
+                    <Trash2 size={14} />
+                </button>
             </div>
 
             {/* Name input */}
@@ -98,7 +115,6 @@ function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
                 />
             </div>
 
-            {/* Value input */}
             <div>
                 <label style={{
                     fontSize: "0.68rem", color: "var(--text-muted)", fontWeight: 600,
@@ -108,6 +124,7 @@ function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
                     value={String(variableValue)}
                     onChange={handleValueChange}
                     placeholder="0.10"
+                    disabled={synced}
                     style={{
                         width: "100%", background: "var(--bg-surface)",
                         border: `1px solid ${synced ? "var(--accent)" : "var(--border-subtle)"}`,

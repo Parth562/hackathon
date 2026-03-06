@@ -87,6 +87,8 @@ async def analysis_node(state: AgentState) -> AgentState:
     from src.tools.financial_analysis_tools import get_kpi_dashboard, get_peer_benchmarking, get_risk_score, generate_bull_bear_thesis, run_scenario_analysis, predict_stock_price
     from src.tools.portfolio_tools import analyze_portfolio
     from src.tools.ml_analysis_tools import classify_trade_signal, forecast_price_prophet, get_technical_indicators, detect_bollinger_breakout
+    from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets
+    from src.tools.alpha_vantage_tools import get_sma, get_ema, get_rsi, get_macd
     
     tools = [
         calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading,
@@ -95,6 +97,9 @@ async def analysis_node(state: AgentState) -> AgentState:
         generate_bull_bear_thesis, run_scenario_analysis, predict_stock_price,
         # ML & advanced analysis
         classify_trade_signal, forecast_price_prophet, get_technical_indicators, detect_bollinger_breakout,
+        # Canvas control & Math
+        get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets,
+        get_sma, get_ema, get_rsi, get_macd,
     ]
     
     data_context = state.get("financial_data", {}).get("raw", "None")
@@ -110,6 +115,10 @@ Use the most relevant combination of tools to answer the user's question:
 - For trend/forecasting: predict_stock_price, forecast_price_prophet
 - For supply chain: analyze_supply_chain_impact
 - For portfolio: analyze_portfolio
+
+When asked to "create a pipeline", "add math blocks", "do preprocessing calculations", or "build a canvas model", use your canvas modification tools:
+1. `add_canvas_widget(session_id, "customWidget", {{"widget_type": "preprocessing", "function": "SMA", "ticker": "AAPL"}})`
+2. `connect_canvas_widgets(...)` to link them to `variableNode` blocks.
 
 Select tools based on what the user actually asked. Do not run every tool — be selective."""
     

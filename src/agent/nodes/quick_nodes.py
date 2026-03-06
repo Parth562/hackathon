@@ -43,7 +43,7 @@ async def read_data_node(state: AgentState, config: RunnableConfig) -> dict:
     from src.tools.finance_tools import get_financial_statements, get_key_metrics
     from src.tools.groww_tools import get_live_stock_price_groww, show_live_stock_widget
     from src.tools.portfolio_tools import analyze_portfolio
-    from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets
+    from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets
     from src.tools.ticker_tools import resolve_ticker
 
     tools = [
@@ -56,6 +56,9 @@ async def read_data_node(state: AgentState, config: RunnableConfig) -> dict:
         set_canvas_variable,
         connect_canvas_widgets,
         disconnect_canvas_widgets,
+        add_canvas_widget,
+        remove_canvas_widget,
+        list_available_widgets,
         resolve_ticker,
     ]
     
@@ -69,12 +72,14 @@ SMART TICKER RESOLUTION:
 - If the user uses a layman name (e.g., 'Nifty 50', 'Google', 'Reliance'), FIRST call resolve_ticker to get the official symbol (e.g., '^NSEI', 'GOOGL', 'RELIANCE.NS').
 - Use the resolved ticker for all subsequent tool calls in this turn.
 
-CANVAS FLOW CREATION (when user asks to "create a flow", "connect widgets", "build a pipeline"):
+CANVAS FLOW CREATION (when user asks to "create a flow", "connect widgets", "build a pipeline", "add math block"):
 1. First call get_canvas_state(session_id="{session_id}") to see what's on the canvas.
-2. Call show_live_stock_widget for any stocks mentioned to add them to the canvas.
-3. Call connect_canvas_widgets to wire the correct ports together (e.g., out-price → in-discount-rate).
-4. Use set_canvas_variable to set or update any named variables.
-5. Explain what you built in plain language.
+2. Use add_canvas_widget(session_id="{session_id}", "customWidget", {{"widget_type": "preprocessing", "function": "SMA", "ticker": "AAPL"}}) for math blocks.
+3. Call show_live_stock_widget or add_canvas_widget for other data blocks.
+4. Call connect_canvas_widgets to wire the correct ports together (e.g., out-result → in-data).
+5. Use set_canvas_variable to set or update any named variables.
+6. Use remove_canvas_widget to delete blocks.
+7. Explain what you built in plain language.
 
 WIDGET DISPLAY (when user asks to "show", "add to canvas", "display"):
 - Call show_live_stock_widget for live price cards.

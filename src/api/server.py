@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from typing import Any
 import urllib.request
 import json
 import sys
@@ -111,12 +112,12 @@ async def upload_document(file: UploadFile = File(...)):
         )
         chunks = text_splitter.split_documents(documents)
         
-        from src.tools.document_tools import document_store
+        from src.tools.document_tools import get_document_store
         
         texts = [chunk.page_content for chunk in chunks]
         metadatas = [{"source": file.filename, **(chunk.metadata if chunk.metadata else {})} for chunk in chunks]
         
-        await asyncio.to_thread(document_store.store_memories_batch, texts, metadatas=metadatas)
+        await asyncio.to_thread(get_document_store().store_memories_batch, texts, metadatas=metadatas)
             
         os.unlink(tmp_path)
         
@@ -131,8 +132,8 @@ async def upload_document(file: UploadFile = File(...)):
 async def get_documents():
     """Returns a list of all uniquely uploaded document filenames from the FAISS index."""
     try:
-        from src.tools.document_tools import document_store
-        sources = await asyncio.to_thread(document_store.get_all_document_sources)
+        from src.tools.document_tools import get_document_store
+        sources = await asyncio.to_thread(get_document_store().get_all_document_sources)
         # Sort for better UX
         sources.sort()
         return {"documents": sources}
@@ -147,8 +148,74 @@ async def get_live_quote(ticker: str):
     try:
         from src.tools.groww_tools import get_live_stock_price_groww
         # The tool returns a JSON string, so we parse it to send as a proper JSON response
-        result_str = await asyncio.to_thread(get_live_stock_price_groww.invoke, {"ticker": ticker})
-        return json.loads(result_str)
+        result_json = await asyncio.to_thread(get_live_stock_price_groww.invoke, ticker)
+        return json.loads(result_json)
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/api/history/{ticker}")
+async def get_price_history(ticker: str, period: str = "1y", interval: str = "1d"):
+    """
+    Returns raw OHLCV price history using yfinance (free, local — no API key).
+    period: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
+    interval: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
+    The browser computes all indicators locally from this data.
+    """
+    try:
+        import yfinance as yf
+        def _fetch():
+            t = yf.Ticker(ticker)
+            hist = t.history(period=period, interval=interval)
+            if hist.empty:
+                return []
+            rows = []
+            for dt, row in hist.iterrows():
+                rows.append({
+                    "time": dt.strftime("%Y-%m-%d") if interval in ("1d","5d","1wk","1mo","3mo") else dt.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "open":   float(row["Open"]),
+                    "high":   float(row["High"]),
+                    "low":    float(row["Low"]),
+                    "close":  float(row["Close"]),
+                    "volume": int(row["Volume"]),
+                })
+            return rows
+
+        data = await asyncio.to_thread(_fetch)
+        return {"ticker": ticker, "data": data}
+    except Exception as e:
+        return {"error": str(e), "data": []}
+
+@app.get("/api/indicators/{ticker}")
+async def get_technical_indicator(ticker: str, function: str = "SMA", interval: str = "daily", time_period: str = "20", series_type: str = "close"):
+    """Fetch Alpha Vantage mathematical preprocessing indicators natively."""
+    try:
+        from src.tools.alpha_vantage_tools import _fetch_alpha_vantage
+        
+        params = {
+            "function": function,
+            "symbol": ticker,
+            "interval": interval,
+            "time_period": time_period,
+            "series_type": series_type
+        }
+        
+        result = await asyncio.to_thread(_fetch_alpha_vantage, params)
+        
+        # Transform Alpha Vantage standard response into a time-series array
+        data_key = next((k for k in result.keys() if "Technical Analysis" in k), None)
+        series = []
+        if data_key and isinstance(result[data_key], dict):
+            # Object with dates like "2024-03-01": {"SMA": "150.22"}
+            for date_str, values in result[data_key].items():
+                # Extract the first value (since key name depends on function)
+                val = next(iter(values.values()), None)
+                if val is not None:
+                    series.append({"time": date_str, "value": float(val)})
+            
+            # Sort chronologically
+            series.sort(key=lambda x: x["time"])
+            
+        return {"ticker": ticker, "function": function, "data": series}
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -158,8 +225,8 @@ async def get_live_quote(ticker: str):
 async def delete_document(filename: str):
     """Deletes all chunks associated with a specific document filename."""
     try:
-        from src.tools.document_tools import document_store
-        success = await asyncio.to_thread(document_store.delete_document_by_source, filename)
+        from src.tools.document_tools import get_document_store
+        success = await asyncio.to_thread(get_document_store().delete_document_by_source, filename)
         if success:
             return {"message": f"Successfully deleted {filename}"}
         else:
@@ -177,8 +244,8 @@ class SimilaritySearchRequest(BaseModel):
 async def search_documents(request: SimilaritySearchRequest):
     """Performs a manual similarity search on the uploaded documents."""
     try:
-        from src.tools.document_tools import document_store
-        results = await asyncio.to_thread(document_store.retrieve_relevant_memories, request.query, limit=request.limit)
+        from src.tools.document_tools import get_document_store
+        results = await asyncio.to_thread(get_document_store().retrieve_relevant_memories, request.query, limit=request.limit)
         
         # Format for frontend
         formatted_results = []
@@ -401,7 +468,7 @@ async def get_session(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 class BoardStateRequest(BaseModel):
-    board_state: list
+    board_state: Any  # Can be list (legacy) or {nodes, edges} object
 
 @app.post("/api/sessions/{session_id}/board")
 async def save_board(session_id: str, request: BoardStateRequest):

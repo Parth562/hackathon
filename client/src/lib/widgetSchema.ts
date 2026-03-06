@@ -56,6 +56,32 @@ const schemas: WidgetSchema[] = [
         ],
     },
     {
+        widgetType: "preprocessing",
+        displayName: "Math Preprocessing",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Stock ticker symbol (e.g. AAPL)" },
+            { id: "in-time-period", label: "Period", type: "number", description: "Time period for the calculation" },
+        ],
+        outputs: [
+            { id: "out-result", label: "Result", type: "number", description: "The calculated mathematical indicator" },
+            { id: "out-series", label: "Time Series", type: "any", description: "The full temporal array of the indicator" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker symbol" },
+        ],
+    },
+    {
+        widgetType: "computational",
+        displayName: "Computational Block",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Stock ticker symbol (e.g. AAPL)" },
+            { id: "in-time-period", label: "Period", type: "number", description: "Lookback period for the indicator" },
+        ],
+        outputs: [
+            { id: "out-result", label: "Result", type: "number", description: "The computed indicator value" },
+            { id: "out-series", label: "Time Series", type: "any", description: "The aggregated indicator signal array" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker symbol" },
+        ],
+    },
+    {
         widgetType: "dcf",
         displayName: "DCF Valuation",
         inputs: [
@@ -73,6 +99,7 @@ const schemas: WidgetSchema[] = [
         displayName: "Price Chart",
         inputs: [
             { id: "in-ticker", label: "Ticker", type: "ticker", description: "Stock ticker to chart" },
+            { id: "in-data", label: "Generic Data", type: "any", description: "Feed a time-series line directly into the chart." },
         ],
         outputs: [
             { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker" },
@@ -158,6 +185,51 @@ const schemas: WidgetSchema[] = [
         ],
     },
     {
+        widgetType: "insider_trading",
+        displayName: "Insider Trading",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Company ticker" },
+        ],
+        outputs: [
+            { id: "out-sentiment", label: "Sentiment", type: "string", description: "Overall insider sentiment" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker" },
+        ],
+    },
+    {
+        widgetType: "ecosystem",
+        displayName: "Ecosystem Map",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Company ticker" },
+        ],
+        outputs: [
+            { id: "out-tier-1", label: "Core Subs", type: "string", description: "Primary subsidiaries" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker" },
+        ],
+    },
+    {
+        widgetType: "supply_chain_impact",
+        displayName: "Supply Chain",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Company ticker" },
+        ],
+        outputs: [
+            { id: "out-risk", label: "Risk Score", type: "number", description: "Supply chain risk/dependency score" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker" },
+        ],
+    },
+    {
+        widgetType: "thesis",
+        displayName: "Bull/Bear Thesis",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Company ticker" },
+        ],
+        outputs: [
+            { id: "out-bull", label: "Bull Thesis", type: "string", description: "Long argument" },
+            { id: "out-bear", label: "Bear Thesis", type: "string", description: "Short argument" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker" },
+        ],
+    },
+    {
         widgetType: "custom",
         displayName: "Custom Widget",
         inputs: [
@@ -165,6 +237,20 @@ const schemas: WidgetSchema[] = [
         ],
         outputs: [
             { id: "out-any", label: "Output", type: "any", description: "Any output data" },
+        ],
+    },
+    {
+        widgetType: "math",
+        displayName: "Math Expr",
+        inputs: [
+            { id: "in-a", label: "A (X Axis)", type: "any", description: "Variable A (scalar or array)" },
+            { id: "in-b", label: "B (Y Axis)", type: "any", description: "Variable B (scalar or array)" },
+            { id: "in-c", label: "C (Z Axis)", type: "any", description: "Variable C (scalar or array)" },
+            { id: "in-d", label: "D (W Axis)", type: "any", description: "Variable D (scalar or array)" },
+        ],
+        outputs: [
+            { id: "out-result", label: "Equation Result", type: "number", description: "Latest aggregated outcome." },
+            { id: "out-series", label: "Equation Timeline", type: "any", description: "Timeline plotting outcome." },
         ],
     },
     // VariableNode is special — its schema is dynamic (one output matching its value type)

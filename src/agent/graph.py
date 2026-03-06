@@ -34,7 +34,8 @@ from src.tools.ml_analysis_tools import (
 )
 from src.memory.vector_store import MemoryManager
 from src.memory.sqlite_store import StructuredStore
-from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets
+from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_canvas_connections, update_canvas_widget, redirect_canvas_connection, set_widget_ticker
+from src.tools.alpha_vantage_tools import get_sma, get_ema, get_rsi, get_macd
 
 # Initialize memory stores lazily to prevent PyTorch OOM on import
 _memory_manager_instance = None
@@ -84,6 +85,17 @@ tools = [
      set_canvas_variable,
      connect_canvas_widgets,
      disconnect_canvas_widgets,
+     add_canvas_widget,
+     remove_canvas_widget,
+     list_canvas_connections,
+     update_canvas_widget,
+     redirect_canvas_connection,
+     set_widget_ticker,
+     # Math/Preprocessing
+     get_sma,
+     get_ema,
+     get_rsi,
+     get_macd,
 ]
 
 # Dynamic LLM Loader

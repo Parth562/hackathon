@@ -18,6 +18,9 @@ import ScenarioWidget from './ScenarioWidget';
 import PredictionWidget from './PredictionWidget';
 import TableWidget from './TableWidget';
 import LiveStockWidget from './LiveStockWidget';
+import PreprocessingWidget from './PreprocessingWidget';
+import ComputationalWidget from './ComputationalWidget';
+import MathWidget from './MathWidget';
 import WidgetSettingsDrawer, { type EdgeBinding } from './WidgetSettingsDrawer';
 import { getSchema, PORT_COLORS, PortDef } from '@/lib/widgetSchema';
 
@@ -52,7 +55,7 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
     const { widgetData, onRemove } = data;
     const [settingsOpen, setSettingsOpen] = useState(false);
     const edges = useEdges();
-    const { setEdges } = useReactFlow();
+    const { setEdges, setNodes } = useReactFlow();
 
     const widgetType = widgetData?.widget_type || widgetData?.type || widgetData?.chart_type;
     const schema = getSchema(widgetType ?? "");
@@ -86,6 +89,21 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
         setEdges((eds) => eds.filter((e) => e.id !== edgeId));
     };
 
+    const handleOutputChange = (updates: Record<string, any>) => {
+        setNodes((nds) => nds.map((n) => {
+            if (n.id === id) {
+                return {
+                    ...n,
+                    data: {
+                        ...n.data,
+                        outputData: { ...(n.data.outputData || {}), ...updates }
+                    }
+                };
+            }
+            return n;
+        }));
+    };
+
     let content = null;
     if (widgetData?.chart_type || widgetType === 'chart') {
         content = <ChartWidget data={widgetData} onClose={handleClose} />;
@@ -100,7 +118,7 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
     } else if (widgetType === 'custom') {
         content = <CustomWidget data={widgetData} onClose={handleClose} />;
     } else if (widgetType === 'portfolio_analysis') {
-        content = <PortfolioWidget data={widgetData} onClose={handleClose} />;
+        content = <PortfolioWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
     } else if (widgetType === 'kpi_dashboard') {
         content = <KpiDashboardWidget data={widgetData} onClose={handleClose} />;
     } else if (widgetType === 'peer_benchmark') {
@@ -114,9 +132,15 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
     } else if (widgetType === 'prediction') {
         content = <PredictionWidget data={widgetData} onClose={handleClose} />;
     } else if (widgetType === 'table') {
-        content = <TableWidget data={widgetData} onClose={handleClose} />;
+        content = <TableWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
     } else if (widgetType === 'live_stock') {
-        content = <LiveStockWidget data={widgetData} onClose={handleClose} />;
+        content = <LiveStockWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+    } else if (widgetType === 'preprocessing') {
+        content = <PreprocessingWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+    } else if (widgetType === 'computational') {
+        content = <ComputationalWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+    } else if (widgetType === 'math') {
+        content = <MathWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
     } else {
         const title = widgetType ? widgetType.replace('_', ' ') : 'Structured Analysis';
         content = (

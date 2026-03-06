@@ -45,7 +45,7 @@ export const SessionMetaSchema = z.object({
 export type SessionMeta = z.infer<typeof SessionMetaSchema>;
 
 export const SessionDetailSchema = SessionMetaSchema.extend({
-    board_state: z.array(z.any()),
+    board_state: z.any(),
     messages: z.array(z.object({ role: z.string(), content: z.string() })).default([]),
 });
 export type SessionDetail = z.infer<typeof SessionDetailSchema>;

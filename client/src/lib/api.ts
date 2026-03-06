@@ -38,7 +38,7 @@ export async function fetchSession(id: string): Promise<SessionDetail> {
     return json(res, (v) => SessionDetailSchema.parse(v));
 }
 
-export async function saveBoardState(sessionId: string, boardState: unknown[]) {
+export async function saveBoardState(sessionId: string, boardState: any) {
     await fetch(`${BASE}/api/sessions/${sessionId}/board`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

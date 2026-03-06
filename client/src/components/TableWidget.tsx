@@ -11,10 +11,20 @@ interface TableWidgetProps {
         markdown: string; // the raw markdown table string
     };
     onClose?: (e?: React.MouseEvent) => void;
+    onOutputChange?: (updates: Record<string, any>) => void;
 }
 
-export default function TableWidget({ data, onClose }: TableWidgetProps) {
+export default function TableWidget({ data, onClose, onOutputChange }: TableWidgetProps) {
     const title = data.title || "Data Table";
+
+    const lastEmittedRef = React.useRef<string | null>(null);
+
+    React.useEffect(() => {
+        if (onOutputChange && data.markdown && data.markdown !== lastEmittedRef.current) {
+            lastEmittedRef.current = data.markdown;
+            onOutputChange({ 'data': data.markdown });
+        }
+    }, [data.markdown, onOutputChange]);
     return (
         <div
             className="glass-panel"

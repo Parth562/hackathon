@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
+import { LineChart, Line, YAxis, ResponsiveContainer } from 'recharts';
 
 interface LiveStockWidgetProps {
   data: {
@@ -8,9 +9,10 @@ interface LiveStockWidgetProps {
     name?: string;
   };
   onClose?: (e: React.MouseEvent) => void;
+  onOutputChange?: (updates: Record<string, any>) => void;
 }
 
-const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose }) => {
+const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose, onOutputChange }) => {
   const [price, setPrice] = useState<number | null>(null);
   const [prevPrice, setPrevPrice] = useState<number | null>(null);
   const [currency, setCurrency] = useState<string>('');
@@ -19,6 +21,7 @@ const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose }) => {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<any>(null);
+  const [history, setHistory] = useState<{ time: string, price: number }[]>([]);
 
   const prevPriceRef = useRef(price);
 
@@ -65,6 +68,27 @@ const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose }) => {
         setDetails(extractDetails);
         setError(null);
 
+        // Propagate outputs to the visual board UNCONDITIONALLY upon fetch
+        // so any new edges correctly get the latest state immediately
+        if (onOutputChange) {
+          const updates: Record<string, any> = {
+            'price': newPrice,
+            'ticker': data.ticker
+          };
+          if (extractDetails?.previous_close) {
+            updates['change'] = newPrice - extractDetails.previous_close;
+          }
+          onOutputChange(updates);
+        }
+
+        const now = new Date();
+        setHistory(prev => {
+          const newPoint = { time: now.toLocaleTimeString(), price: newPrice };
+          // Keep the last 30 data points
+          const updated = [...prev, newPoint];
+          return updated.slice(-30);
+        });
+
         setTimeout(() => setFlash(null), 1000);
       }
 
@@ -80,6 +104,7 @@ const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose }) => {
     setPrevPrice(null);
     setError(null);
     setDetails(null);
+    setHistory([]);
     setSource('Loading...');
     prevPriceRef.current = null;
 
@@ -160,6 +185,24 @@ const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose }) => {
           <div style={getPriceStyle()}>
             {formatCurrency(price)}
           </div>
+
+          {history.length > 1 && (
+            <div style={{ height: '60px', width: '100%', marginBottom: '16px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={history}>
+                  <YAxis domain={['auto', 'auto']} hide />
+                  <Line
+                    type="monotone"
+                    dataKey="price"
+                    stroke={price > (history[0]?.price ?? price) ? '#00ff66' : '#ff4757'}
+                    strokeWidth={2}
+                    dot={false}
+                    isAnimationActive={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
           <div style={metaDataStyle}>
             {details && details.high && (
