@@ -81,7 +81,7 @@ import tempfile
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
-    """Uploads a company document, extracts text, chunks it, and stores in the FAISS document index."""
+    """Uploads a company document, extracts text, chunks it, and stores in the Qdrant document index."""
     try:
         # Create a temporary file to save the uploaded content
         suffix = os.path.splitext(file.filename)[1]
@@ -130,7 +130,7 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.get("/api/documents")
 async def get_documents():
-    """Returns a list of all uniquely uploaded document filenames from the FAISS index."""
+    """Returns a list of all uniquely uploaded document filenames from the Qdrant index."""
     try:
         from src.tools.document_tools import get_document_store
         sources = await asyncio.to_thread(get_document_store().get_all_document_sources)
@@ -422,12 +422,23 @@ async def chat_endpoint(request: ChatRequest):
             
             mode = current_state.get('research_mode', 'UNKNOWN')
             
+            # Clean up final text to prevent any rogue JSON/routing tags from leaking to the UI
+            import re
+            cleaned_response = re.sub(r'(RESEARCH|DATA|ANALYSIS|PLANNER)\s*\{[\s\S]*?\}', '', response_text).strip()
+            
             yield json.dumps({
                 "type": "result", 
-                "response": response_text,
+                "response": cleaned_response,
                 "session_id": session_id,
                 "mode": mode
             }) + "\n"
+            
+            # Fire-and-forget: extract and store personal facts from the user's message
+            try:
+                from src.agent.nodes.memory_node import extract_and_store_facts
+                asyncio.create_task(extract_and_store_facts(request.message))
+            except Exception as e:
+                print(f"[Memory] Failed to schedule fact extraction: {e}")
 
         except Exception as e:
             error_msg = str(e)

@@ -44,6 +44,26 @@ export function isCompatible(source: PortType, target: PortType): boolean {
 
 const schemas: WidgetSchema[] = [
     {
+        widgetType: "network_graph",
+        displayName: "Network Graph",
+        inputs: [
+            { id: "in-data", label: "Graph Data", type: "any", description: "Nodes and edges data" },
+        ],
+        outputs: [
+            { id: "out-selection", label: "Selected Node", type: "string", description: "Currently clicked node ID" },
+        ],
+    },
+    {
+        widgetType: "sandbox",
+        displayName: "Python Sandbox",
+        inputs: [
+            { id: "in-any", label: "Data In", type: "any", description: "Variables to inject into Sandbox" },
+        ],
+        outputs: [
+            { id: "out-any", label: "Data Out", type: "any", description: "Resulting output from code execution" },
+        ],
+    },
+    {
         widgetType: "live_stock",
         displayName: "Live Stock Price",
         inputs: [

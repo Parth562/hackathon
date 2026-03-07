@@ -20,6 +20,7 @@ Backend Capabilities (Python/FastAPI/LangGraph):
   - Correlation Analysis: Calculates statistical correlations between different assets.
   - Insider Trading: Tracks and visualizes insider buy/sell activities.
   - Ecosystem Mapping: Analyzes and visualizes a company's business ecosystem and relationships.
+  - Python Code Sandbox: A secure, isolated Python execution environment allowing the LLM to write and run custom scripts (with timeouts) for proprietary math, arrays, or algorithms not covered by standard tools.
 - Web & Document Intelligence:
   - Web Scraping: Autonomous web search and page scraping for latest news/sentiment using DuckDuckGo and Playwright.
   - RAG (Retrieval-Augmented Generation): Ingests and searches uploaded company documents (PDFs/Reports) using Qdrant vector database.
@@ -28,12 +29,13 @@ Backend Capabilities (Python/FastAPI/LangGraph):
   - Structured Storage: Caches financial data in SQLite for quick retrieval.
 
 Frontend Dashboard (Next.js/React):
-- Interactive Chat Interface: A persistent chat sidebar for conversing with the financial agent.
-- Dynamic Widget Board: A main workspace that dynamically renders interactive widgets based on the conversation context.
+- Interactive Chat Interface: A persistent chat sidebar for conversing with the financial agent, featuring ReactMarkdown for beautifully formatted internal tool execution logs.
+- Dynamic Widget Board: A main workspace that dynamically renders interactive widgets based on the conversation context. Features a "Decoupled Data Architecture" where the LLM passes lightweight configuration parameters to widgets, and widgets autonomously fetch their own massive datasets to prevent LLM token bloat.
 - Custom Widgets:
   - ChartWidget: Interactive stock price and comparison graphs.
   - DcfWidget: Visual breakdown of DCF valuation assumptions and outputs.
-  - EcosystemWidget: Network graph of company relationships.
+  - EcosystemWidget / NetworkGraphWidget: Force-directed network graph visualizing interconnected entities and industry relationships.
+  - SandboxWidget: A split-pane IDE view showing the Python code written by the agent alongside its terminal execution output.
   - InsiderWidget: Visual tracker for insider trading activity.
   - CustomWidget: Flexible component for rendering miscellaneous data insights.
 

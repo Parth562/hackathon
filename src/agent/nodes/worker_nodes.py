@@ -13,13 +13,28 @@ async def _run_sub_agent(state: AgentState, name: str, prompt: str, tools: list)
     # We pass the original user query and any relevant context
     user_query = state['messages'][-1].content if state['messages'] else ""
     plan_str = "\n".join(state.get("plan", []))
+    doc_context = state.get("document_context", "") or ""
+    mem_context = state.get("memory_context", "") or ""
+    
+    extra_context = ""
+    if mem_context:
+        extra_context += f"\n{mem_context}\n"
+    if doc_context:
+        extra_context += f"""
+UPLOADED DOCUMENT CONTEXT (auto-retrieved from user's uploaded files — USE THIS DATA):
+{doc_context}
+
+IMPORTANT: The above document context was retrieved from the user's uploaded files (PDFs, reports, prospectuses).
+If it contains information relevant to the query, you MUST use it as your primary data source.
+Do NOT ignore it in favor of external lookups if it already answers the question.
+"""
     
     full_prompt = f"""You are the {name} AGENT.
 Your job is to execute your specific step in the larger quant pipeline.
 User Query: {user_query}
 Overall Plan:
 {plan_str}
-
+{extra_context}
 YOUR INSTRUCTIONS:
 {prompt}
 """
@@ -53,10 +68,13 @@ async def research_node(state: AgentState) -> AgentState:
     from src.tools.research_tools import search_pdf_content
     
     tools = [search_web, scrape_webpage, search_company_documents, search_pdf_content]
-    prompt = """Gather qualitative info, news, company documents, or context needed to answer the query.
-For deep analysis, prefer the `search_pdf_content` tool to find institutional reports or official PDF announcements using Google Dorking.
-If the user asks about an upcoming IPO or an unlisted SME company (e.g. "Srinibas Pradhan IPO"), it will NOT have a stock ticker. You MUST use `search_web` to find the IPO details, and then use `scrape_webpage` on the top search results to extract the actual text.
-Do not do math or pull raw metrics. Focus on narrative, catalysts, and events."""
+    prompt = """You are the Qualitative Research Agent.
+GOAL: Gather deep contextual, qualitative data (news, macro, narratives, management commentary).
+RULES:
+1. No Math: Leave financial data and ratio calculation to the Data and Analysis agents.
+2. IPOs & Unlisted: For private/SME upcoming IPOs (e.g. "Srinibas Pradhan"), tickers won't work. Use `search_web` to find DRHP/Prospectus links, then `scrape_webpage` to extract text.
+3. PDF Priority: Use `search_pdf_content` for deep institutional reports when relevant.
+OUTPUT FORMAT: Provide a highly structured qualitative summary with bullet points and clear citations."""
     
     result = await _run_sub_agent(state, "RESEARCH", prompt, tools)
     return {
@@ -73,9 +91,13 @@ async def data_node(state: AgentState) -> AgentState:
     from src.tools.scraping_tools import search_web, scrape_webpage
     
     tools = [get_stock_price, get_financial_statements, get_key_metrics, get_options_data, search_web, scrape_webpage]
-    prompt = """Fetch EXACT numerical financial data (price, balance sheet, metrics) using your tools. Do not analyze. Just provide the raw verified data requested.
-If the company is publicly traded, use yfinance tools (get_stock_price, get_financial_statements).
-If the company is an upcoming IPO, SME IPO, or unlisted (e.g. "Srinibas Pradhan"), yfinance WILL FAIL. Instead, you MUST use `search_web` with good keywords (e.g. "[Company] IPO financial revenue last 3 quarters") and then use `scrape_webpage` to read the exact numbers from the DRHP or IPO articles."""
+    prompt = """You are the Data Engineering Agent.
+GOAL: Fetch highly accurate, EXACT numerical financial data.
+RULES:
+1. Verify Tickers: Ensure the ticker is correct before querying.
+2. Public vs Private: Use yfinance tools for listed companies. For unlisted/IPOs, use `search_web` + `scrape_webpage` to find exact DRHP metrics.
+3. No Analysis: Do not calculate DCF, SMA, or explain trends. Just retrieve and structure the raw verifiable numbers.
+OUTPUT FORMAT: Output tables or structured markdown detailing metrics, dates, and sources."""
     
     result = await _run_sub_agent(state, "DATA", prompt, tools)
     return {
@@ -93,6 +115,7 @@ async def analysis_node(state: AgentState) -> AgentState:
     from src.tools.ml_analysis_tools import classify_trade_signal, forecast_price_prophet, get_technical_indicators, detect_bollinger_breakout
     from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets
     from src.tools.alpha_vantage_tools import get_sma, get_ema, get_rsi, get_macd
+    from src.tools.sandbox_tools import execute_python_code
     
     tools = [
         calculate_correlations, find_leading_companies, get_company_ecosystem, get_insider_trading,
@@ -103,28 +126,31 @@ async def analysis_node(state: AgentState) -> AgentState:
         classify_trade_signal, forecast_price_prophet, get_technical_indicators, detect_bollinger_breakout,
         # Canvas control & Math
         get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets,
-        get_sma, get_ema, get_rsi, get_macd,
+        # Indicators & Sandbox
+        get_sma, get_ema, get_rsi, get_macd, execute_python_code
     ]
     
     data_context = state.get("financial_data", {}).get("raw", "None")
-    prompt = f"""Run deep financial analysis using your tools.
-You have access to raw data gathered by the Data agent: {data_context}
+    prompt = f"""You are the Quantitative Analysis Agent.
+GOAL: Execute rigorous financial models and calculations using the specified tools.
+RAW DATA AVAILABLE: {data_context}
 
-Use the most relevant combination of tools to answer the user's question:
-- For valuation: calculate_dcf, run_scenario_analysis
-- For risk: get_risk_score, detect_bollinger_breakout
-- For fundamentals: get_kpi_dashboard, get_peer_benchmarking
-- For investment thesis: generate_bull_bear_thesis
-- For technical signals: get_technical_indicators, classify_trade_signal
-- For trend/forecasting: predict_stock_price, forecast_price_prophet
-- For supply chain: analyze_supply_chain_impact
-- For portfolio: analyze_portfolio
-
-When asked to "create a pipeline", "add math blocks", "do preprocessing calculations", or "build a canvas model", use your canvas modification tools:
-1. `add_canvas_widget(session_id, "customWidget", {{"widget_type": "preprocessing", "function": "SMA", "ticker": "AAPL"}})`
-2. `connect_canvas_widgets(...)` to link them to `variableNode` blocks.
-
-Select tools based on what the user actually asked. Do not run every tool — be selective."""
+RULES:
+1. Precision matters: Ensure accurate inputs to your models. Do not invent target dates.
+2. Be selective: ONLY use the tools relevant to the user query. 
+3. Tool Usage:
+   - Valuation: calculate_dcf, run_scenario_analysis
+   - Risk: get_risk_score, detect_bollinger_breakout
+   - Fundamentals: get_kpi_dashboard, get_peer_benchmarking
+   - Technicals/Trend: get_sma, get_ema, get_rsi, get_macd, forecast_price_prophet, classify_trade_signal
+4. Canvas UI Integration & Decoupled Data: 
+   - If asked to "create a workflow/pipeline/model visually" or "plot a chart/graph/SMA", DO NOT fetch the raw data yourself! 
+   - Massive arrays of JSON will break your context window. 
+   - INSTEAD, strictly use `add_canvas_widget` (e.g. type `preprocessing` or `chart` or `network_graph`) passing just the minimal config (like `ticker` and `period`). The frontend widget will fetch its own data.
+5. Python Sandbox Execution:
+   - If you need to perform custom mathematical combinations, complex matrix math, write algorithmic backtests, calculate Fibonacci sequences, or run *anything* that requires looping logic not provided by the tools, you MUST write the python script yourself and run it using the `execute_python_code` tool. 
+   - Write self-contained python scripts with `print()` for the result. Using this tool automatically deploys a beautiful IDE widget to the user showcasing your code. Output the results of your script into your analysis report.
+OUTPUT FORMAT: Present your analysis as a polished financial report section. Breakdown the math, clarify assumptions, and highlight actionable insights."""
     
     result = await _run_sub_agent(state, "ANALYSIS", prompt, tools)
     return {
@@ -142,17 +168,17 @@ async def critic_node(state: AgentState) -> AgentState:
     data = state.get("financial_data", {}).get("raw", "")
     analysis = state.get("analysis_results", {}).get("findings", "")
     
-    prompt = f"""You are the CRITIC AGENT.
-Your job is to review the Data and Analysis provided by previous agents.
-Look for inconsistencies, hallucinated numbers, or overly optimistic assumptions (especially in DCF or Bull Thesis).
+    prompt = f"""You are the Risk & Compliance Critic Agent.
+GOAL: Act as the ultimate skeptic for the multi-agent pipeline.
+DATA GATHERED: {data}
+ANALYSIS PERFORMED: {analysis}
 
-DATA GATHERED:
-{data}
+RULES:
+1. Challenge Assumptions: Identify overly optimistic inputs in DCF models or growth forecasts.
+2. Detect Hallucinations: Flag any dates that are in the future or numbers that contradict each other.
+3. Context Check: Ensure findings align with known macroeconomic reality.
 
-ANALYSIS PERFORMED:
-{analysis}
-
-Write a short, sharp critique of the financial risks and any data inconsistencies.
+OUTPUT FORMAT: A short, sharp, structured critique titled "CRITIC'S REVIEW". Bullet point the key risks and inconsistencies.
 """
     try:
         res = await llm.ainvoke([SystemMessage(content=prompt)])

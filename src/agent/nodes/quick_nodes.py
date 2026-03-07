@@ -10,6 +10,19 @@ async def _run_tool_calling_agent(state: AgentState, name: str, system_prompt: s
     
     # We pass the full message history to the fast tool-calling agent
     messages = state.get("messages", [])
+    doc_context = state.get("document_context", "") or ""
+    mem_context = state.get("memory_context", "") or ""
+    
+    extra_context = ""
+    if mem_context:
+        extra_context += f"\n{mem_context}\n"
+    if doc_context:
+        extra_context += f"""
+UPLOADED DOCUMENT CONTEXT (auto-retrieved from user's uploaded files):
+{doc_context}
+
+If this context answers the user's question, use it directly instead of calling external tools.
+"""
     
     # Using create_react_agent (which LangGraph sets up for tool-calling)
     agent = create_react_agent(llm, tools)
@@ -18,7 +31,7 @@ async def _run_tool_calling_agent(state: AgentState, name: str, system_prompt: s
 Your job is to parse the user's request and IMMEDIATELY call the provided tool.
 Do not reason, do not over-explain, do not hesitate.
 If you have the necessary arguments, call the tool directly.
-
+{extra_context}
 {system_prompt}"""
 
     try:

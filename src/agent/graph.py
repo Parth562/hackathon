@@ -32,7 +32,7 @@ from src.tools.ml_analysis_tools import (
     classify_trade_signal, forecast_price_prophet,
     get_technical_indicators, detect_bollinger_breakout,
 )
-from src.memory.vector_store import MemoryManager
+from src.memory.qdrant_store import MemoryManager
 from src.memory.sqlite_store import StructuredStore
 from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_canvas_connections, update_canvas_widget, redirect_canvas_connection, set_widget_ticker
 from src.tools.alpha_vantage_tools import get_sma, get_ema, get_rsi, get_macd
@@ -132,8 +132,8 @@ def route_query(state: AgentState) -> str:
 
 def create_agent_graph() -> StateGraph:
     """
-    Builds the 4-Tier Agent Pipeline Architecture:
-    Intent Routing -> (Quick/Direct Nodes OR Analysis OR Full Planner/Research)
+    Builds the 4-Tier Agent Pipeline Architecture with dynamic agent skipping.
+    Intent Routing -> (Quick/Direct Nodes OR Analysis OR Dynamic Planner/Research/Data/Analysis)
     """
     builder = StateGraph(AgentState)
     
@@ -171,23 +171,62 @@ def create_agent_graph() -> StateGraph:
     # ANALYSIS route short-circuits planner/research/data
     builder.add_edge("analysis", "critic")
     
+    # ── Dynamic routing based on planner's required_agents ──────────────
+
+    def route_after_planner(state: AgentState) -> str:
+        """After planning, go to first required agent or skip to report."""
+        if state.get("forced_mode") == "CONTEXT":
+            # CONTEXT mode: always go research → report (legacy behavior)
+            return "research"
+        required = state.get("required_agents", [])
+        if "research" in required:
+            return "research"
+        elif "data" in required:
+            return "data"
+        elif "analysis" in required:
+            return "analysis"
+        else:
+            # No agents needed — go straight to report
+            return "report"
+
     def route_after_research(state: AgentState) -> str:
-        """If user requested CONTEXT mode, skip Data and Analysis entirely."""
+        """After research, check if data/analysis are needed or skip."""
         if state.get("forced_mode") == "CONTEXT":
             return "report"
-        return "data"
+        required = state.get("required_agents", [])
+        if "data" in required:
+            return "data"
+        elif "analysis" in required:
+            return "analysis"
+        else:
+            return "report"
 
-    # RESEARCH route goes through the full deep pipeline (or short-circuits for CONTEXT)
-    builder.add_edge("planner",  "research")
+    def route_after_data(state: AgentState) -> str:
+        """After data, check if analysis is needed or skip to critic/report."""
+        required = state.get("required_agents", [])
+        if "analysis" in required:
+            return "analysis"
+        else:
+            # Skip analysis, go to critic for data validation
+            return "critic"
+
+    builder.add_conditional_edges(
+        "planner",
+        route_after_planner,
+        {"research": "research", "data": "data", "analysis": "analysis", "report": "report"}
+    )
+
     builder.add_conditional_edges(
         "research",
         route_after_research,
-        {
-            "data": "data",
-            "report": "report"
-        }
+        {"data": "data", "analysis": "analysis", "report": "report"}
     )
-    builder.add_edge("data",     "analysis")
+
+    builder.add_conditional_edges(
+        "data",
+        route_after_data,
+        {"analysis": "analysis", "critic": "critic"}
+    )
     
     # Standard tail for deep paths
     builder.add_edge("critic",   "report")

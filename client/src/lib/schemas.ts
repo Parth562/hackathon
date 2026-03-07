@@ -18,7 +18,7 @@ export const ChatRequestSchema = z.object({
     session_id: z.string().optional(),
     model_name: z.string().default("gemini-2.5-flash"),
     provider: z.string().default("google"),
-    forced_mode: z.enum(["QUICK", "CONTEXT", "DEEP"]).optional(),
+    forced_mode: z.enum(["AUTO", "QUICK", "CONTEXT", "DEEP"]).optional(),
 });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 

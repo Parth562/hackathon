@@ -172,7 +172,13 @@ def add_canvas_widget(session_id: str, widget_type: str, arguments: dict = None)
     Adds a new widget or variable node to the canvas.
     widget_type can be 'variableNode' or 'customWidget'.
     If 'customWidget', arguments should contain 'widget_type' matching one of the supported 
-    widgets (e.g., 'live_stock', 'preprocessing', 'computational', 'chart').
+    widgets (e.g., 'live_stock', 'preprocessing', 'computational', 'chart', 'network_graph').
+    
+    CRITICAL INSTRUCTION FOR DATA FETCHING:
+    Do NOT fetch massive historical pricing or indicator arrays to pass into `arguments`! 
+    The browser widgets will fetch their own data directly. You must ONLY pass the configuration 
+    parameters needed (e.g. `{"widget_type": "preprocessing", "ticker": "AAPL", "function": "SMA"}`).
+    
     CRITICAL: Do not invent widget types. Use `list_available_widgets` to find supported ones.
     If 'variableNode', arguments should contain 'variableName' and 'variableValue'.
     """
@@ -316,6 +322,7 @@ def list_available_widgets() -> str:
     and exactly these input/output IDs when connecting widgets.
     """
     schema = [
+        {"widget_type": "network_graph", "inputs": ["in-data"], "outputs": ["out-selection"]},
         {"widget_type": "live_stock", "inputs": ["in-ticker"], "outputs": ["out-ticker", "out-price", "out-change"]},
         {"widget_type": "preprocessing", "inputs": ["in-ticker", "in-time-period"], "outputs": ["out-result", "out-series", "out-ticker"]},
         {"widget_type": "computational", "inputs": ["in-ticker", "in-time-period"], "outputs": ["out-result", "out-series", "out-ticker"]},

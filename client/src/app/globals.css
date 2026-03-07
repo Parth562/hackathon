@@ -258,6 +258,16 @@ body {
   color: #fff;
 }
 
+.mode-toggle-btn.active.auto {
+  background: rgb(168, 85, 247);
+  color: #fff;
+}
+
+.mode-toggle-btn.active.context {
+  background: var(--primary);
+  color: #fff;
+}
+
 /* ── Badge / Tag ─────────────────────────────────────── */
 .badge {
   display: inline-flex;

@@ -93,7 +93,11 @@ export default function PreprocessingWidget({ data, onClose, onOutputChange, onO
                     <Calculator size={17} />
                     Math Preprocessing
                     <span style={{ fontSize: '0.68rem', color: '#3fb950', marginLeft: 2, display: 'flex', alignItems: 'center', gap: '2px' }}><Zap size={10} /> Local</span>
-                    {ticker && <span style={{ fontSize: '0.7rem', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', color: 'var(--accent)' }}>{ticker}</span>}
+                    {ticker && (
+                        <span style={{ fontSize: '0.7rem', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', color: 'var(--accent)' }}>
+                            {typeof ticker === 'string' ? ticker : JSON.stringify(ticker)}
+                        </span>
+                    )}
                 </h3>
                 <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                     {onOpenSettings && (
@@ -139,13 +143,13 @@ export default function PreprocessingWidget({ data, onClose, onOutputChange, onO
                 {!ticker ? (
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Connect a Ticker to calculate.</div>
                 ) : loading ? (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Fetching {ticker} OHLCV…</div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Fetching {typeof ticker === 'string' ? ticker : "data"} OHLCV…</div>
                 ) : error ? (
                     <div style={{ color: '#ff4757', fontSize: '0.8rem', textAlign: 'center' }}>{error}</div>
                 ) : (
                     <>
                         <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                            {ticker} {fn}({period}) — {ohlcv.length} bars
+                            {typeof ticker === 'string' ? ticker : "Data"} {fn}({period}) — {ohlcv.length} bars
                         </div>
                         <div style={{ fontSize: '2rem', fontWeight: 600, color: '#fff', marginBottom: '12px' }}>
                             {latest !== null ? latest.toFixed(4) : '--'}
