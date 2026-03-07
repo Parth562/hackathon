@@ -113,7 +113,7 @@ async def analysis_node(state: AgentState) -> AgentState:
     from src.tools.financial_analysis_tools import get_kpi_dashboard, get_peer_benchmarking, get_risk_score, generate_bull_bear_thesis, run_scenario_analysis, predict_stock_price
     from src.tools.portfolio_tools import analyze_portfolio
     from src.tools.ml_analysis_tools import classify_trade_signal, forecast_price_prophet, get_technical_indicators, detect_bollinger_breakout
-    from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets
+    from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets, buy_shares_on_canvas, sell_shares_on_canvas, add_conditional_node
     from src.tools.alpha_vantage_tools import get_sma, get_ema, get_rsi, get_macd
     from src.tools.sandbox_tools import execute_python_code
     
@@ -126,6 +126,7 @@ async def analysis_node(state: AgentState) -> AgentState:
         classify_trade_signal, forecast_price_prophet, get_technical_indicators, detect_bollinger_breakout,
         # Canvas control & Math
         get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets,
+        buy_shares_on_canvas, sell_shares_on_canvas, add_conditional_node,
         # Indicators & Sandbox
         get_sma, get_ema, get_rsi, get_macd, execute_python_code
     ]
@@ -148,10 +149,14 @@ RULES:
    - Massive arrays of JSON will break your context window. 
    - INSTEAD, strictly use `add_canvas_widget` (e.g. type `preprocessing` or `chart` or `network_graph`) passing just the minimal config (like `ticker` and `period`). The frontend widget will fetch its own data.
 5. Python Sandbox Execution:
-   - If you need to perform custom mathematical combinations, complex matrix math, write algorithmic backtests, calculate Fibonacci sequences, or run *anything* that requires looping logic not provided by the tools, you MUST write the python script yourself and run it using the `execute_python_code` tool. 
+   - If you need to perform custom mathematical combinations, complex matrix math, write algorithmic backtests, calculate Fibonacci sequences, or run *anything* that requires looping logic not provided by the tools, you MUST write the python script yourself and run it using the `execute_python_code` tool.
+   - REACTIVITY & PIPING: The Sandbox now supports reactive inputs. You can pass a dictionary of `inputs` (e.g. `{{'a': 10, 'b': 20}}`) to `execute_python_code`. These will be injected as variables `a` and `b` into your script.
+   - The widget has ports `in-a`, `in-b`, `in-c`, `in-d`. If you connect variables to these ports on the canvas, the script will automatically RE-RUN whenever they change.
+   - OUTPUT PIPING & MULTI-VARS: The script result is piped to `out-result`. If you want to push specific values to multiple variable widgets on the canvas, have your python script print a JSON string like `print(json.dumps({{"out-a": value1, "out-b": value2}}))`. The Sandbox widget will parse this and pipe to the `out-a` and `out-b` ports!
+   - ERROR HANDLING: If the `execute_python_code` tool returns an error/traceback, DO NOT GIVE UP. You MUST read the error, fix your code, and try calling the tool again (up to 2 times).
    - Write self-contained python scripts with `print()` for the result. Using this tool automatically deploys a beautiful IDE widget to the user showcasing your code. Output the results of your script into your analysis report.
-OUTPUT FORMAT: Present your analysis as a polished financial report section. Breakdown the math, clarify assumptions, and highlight actionable insights."""
-    
+OUTPUT FORMAT: Keep your chat response incredibly CONCISE and SIMPLE. Highlight the actionable insight, but do not write a massive essay. The user relies on the interactive canvas widgets for the details."""
+
     result = await _run_sub_agent(state, "ANALYSIS", prompt, tools)
     return {
         "analysis_results": {"findings": result["content"]},

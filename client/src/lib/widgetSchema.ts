@@ -6,7 +6,7 @@
 
 // ── Port Types ────────────────────────────────────────────────────────────────
 
-export type PortType = "number" | "string" | "ticker" | "table" | "any";
+export type PortType = "number" | "string" | "ticker" | "table" | "boolean" | "any";
 
 export interface PortDef {
     id: string;       // Unique handle id, matches ReactFlow handle `id`
@@ -29,6 +29,7 @@ export const PORT_COLORS: Record<PortType, string> = {
     string: "#8b949e",   // gray
     ticker: "#3fb950",   // green
     table: "#f0883e",   // orange
+    boolean: "#bc8cff",  // purple
     any: "#ffffff",   // white
 };
 
@@ -57,10 +58,17 @@ const schemas: WidgetSchema[] = [
         widgetType: "sandbox",
         displayName: "Python Sandbox",
         inputs: [
-            { id: "in-any", label: "Data In", type: "any", description: "Variables to inject into Sandbox" },
+            { id: "in-a", label: "Input A", type: "any", description: "Variable 'a' injected into Python" },
+            { id: "in-b", label: "Input B", type: "any", description: "Variable 'b' injected into Python" },
+            { id: "in-c", label: "Input C", type: "any", description: "Variable 'c' injected into Python" },
+            { id: "in-d", label: "Input D", type: "any", description: "Variable 'd' injected into Python" },
         ],
         outputs: [
-            { id: "out-any", label: "Data Out", type: "any", description: "Resulting output from code execution" },
+            { id: "out-result", label: "Script Result", type: "any", description: "The final printed or returned value" },
+            { id: "out-a", label: "Output A", type: "any", description: "JSON dictionary key 'out-a'" },
+            { id: "out-b", label: "Output B", type: "any", description: "JSON dictionary key 'out-b'" },
+            { id: "out-c", label: "Output C", type: "any", description: "JSON dictionary key 'out-c'" },
+            { id: "out-d", label: "Output D", type: "any", description: "JSON dictionary key 'out-d'" },
         ],
     },
     {
@@ -257,6 +265,45 @@ const schemas: WidgetSchema[] = [
         ],
         outputs: [
             { id: "out-any", label: "Output", type: "any", description: "Any output data" },
+        ],
+    },
+    {
+        widgetType: "buy_shares",
+        displayName: "Buy Shares",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Stock ticker symbol to buy" },
+            { id: "in-quantity", label: "Quantity", type: "number", description: "Number of shares to buy" },
+            { id: "in-price", label: "Price", type: "number", description: "Cost basis per share (optional)" },
+        ],
+        outputs: [
+            { id: "out-status", label: "Status", type: "string", description: "Order status (bought / error)" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker" },
+        ],
+    },
+    {
+        widgetType: "sell_shares",
+        displayName: "Sell Shares",
+        inputs: [
+            { id: "in-ticker", label: "Ticker", type: "ticker", description: "Stock ticker symbol to sell" },
+            { id: "in-quantity", label: "Quantity", type: "number", description: "Number of shares to sell" },
+            { id: "in-price", label: "Price", type: "number", description: "Sale price per share (optional)" },
+        ],
+        outputs: [
+            { id: "out-status", label: "Status", type: "string", description: "Order status (sold / error)" },
+            { id: "out-ticker", label: "Ticker", type: "ticker", description: "Pass-through ticker" },
+        ],
+    },
+    {
+        widgetType: "conditional",
+        displayName: "If / Else",
+        inputs: [
+            { id: "in-a", label: "A (Left)", type: "any", description: "Left operand of the comparison" },
+            { id: "in-b", label: "B (Right)", type: "any", description: "Right operand of the comparison" },
+        ],
+        outputs: [
+            { id: "out-result", label: "Result", type: "boolean", description: "'true' or 'false' string" },
+            { id: "out-true-value", label: "True Path", type: "any", description: "Passes A when condition is true" },
+            { id: "out-false-value", label: "False Path", type: "any", description: "Passes B when condition is false" },
         ],
     },
     {

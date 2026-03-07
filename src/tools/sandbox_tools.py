@@ -5,36 +5,34 @@ import json
 from langchain_core.tools import tool
 from src.tools.canvas_tools import _push_action
 
-@tool
-def execute_python_code(session_id: str, code: str) -> str:
-    """
-    Executes a block of Python code in an isolated sandbox environment and returns the stdout/stderr.
-    Use this if you need to calculate complex proprietary mathematics, simulations, arrays 
-    or logic not provided natively by the core finance APIs.
+def run_python_script(code: str, inputs: dict = None) -> dict:
+    """Core helper to execute python code with optional input injection."""
+    full_code = ""
+    if inputs:
+        for k, v in inputs.items():
+            # Basic injection: if it's a string, wrap in quotes, else raw (for numbers/booleans/lists)
+            if isinstance(v, str):
+                full_code += f"{k} = {repr(v)}\n"
+            else:
+                full_code += f"{k} = {json.dumps(v)}\n"
     
-    WARNING: The code must be self-contained. You should print() the final result you want to capture.
+    full_code += code
     
-    As a side-effect, this tool AUTOMATICALLY creates a 'sandbox' widget on the user's interactive canvas 
-    displaying the code you wrote and the output of the terminal.
-    """
-    
-    # 1. Execute the python code
     stdout_output = ""
     stderr_output = ""
     status = "success"
+    script_path = None
     
     try:
-        # Create a temp file to hold the script
         with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w") as f:
-            f.write(code)
+            f.write(full_code)
             script_path = f.name
             
-        # Run it in a subprocess
         result = subprocess.run(
             ["python", script_path],
             capture_output=True,
-            text=True,
-            timeout=15  # Terminate infinite loops after 15 seconds
+            encoding="utf-8",
+            timeout=15
         )
         
         stdout_output = result.stdout
@@ -50,19 +48,50 @@ def execute_python_code(session_id: str, code: str) -> str:
         status = "error"
         stderr_output = f"Sandbox Exception: {str(e)}"
     finally:
-        # Clean up temp file
-        if 'script_path' in locals() and os.path.exists(script_path):
+        if script_path and os.path.exists(script_path):
             os.remove(script_path)
+            
+    # Try to parse stdout as JSON if it looks like it, otherwise use raw
+    parsed_result = None
+    try:
+        # If the script printed only one line and it's valid JSON
+        lines = stdout_output.strip().split('\n')
+        if lines:
+            last_line = lines[-1].strip()
+            parsed_result = json.loads(last_line)
+    except:
+        # Fallback: if stdout is a single number or string, use it
+        stripped = stdout_output.strip()
+        if stripped:
+            if stripped.replace('.','',1).isdigit():
+                parsed_result = float(stripped) if '.' in stripped else int(stripped)
+            else:
+                parsed_result = stripped
+
+    return {
+        "status": status,
+        "stdout": stdout_output,
+        "stderr": stderr_output,
+        "result": parsed_result
+    }
+
+@tool
+def execute_python_code(session_id: str, code: str, inputs: dict = None) -> str:
+    """
+    Executes a block of Python code in an isolated sandbox environment and returns the stdout/stderr.
     
-    final_output = stdout_output
-    if stderr_output:
-        final_output += f"\n[STDERR]\n{stderr_output}"
-        
-    final_output = final_output.strip()
-    if not final_output:
-        final_output = "Script executed successfully but didn't produce any print() output."
-        
-    # 2. Automatically spawn a widget on the UI for the user to see the code execution
+    Inputs can be provided as a dictionary and will be injected as variables into the script.
+    e.g. if inputs={'a': 10}, the script can use the variable `a`.
+    
+    The tool automatically creates a 'sandbox' widget on the canvas.
+    """
+    res = run_python_script(code, inputs)
+    
+    final_output = res["stdout"]
+    if res["stderr"]:
+        final_output += f"\n[STDERR]\n{res['stderr']}"
+    final_output = final_output.strip() or "Script executed successfully."
+    
     import uuid
     new_id = f"sandbox-{uuid.uuid4().hex[:8]}"
     
@@ -77,17 +106,15 @@ def execute_python_code(session_id: str, code: str) -> str:
                     "widget_type": "sandbox",
                     "code": code,
                     "output": final_output,
-                    "status": status
+                    "status": res["status"],
+                    "inputs": inputs or {}
                 }
             }
         }
     }
     _push_action(session_id, action)
     
-    # 3. Return the result back to the LLM agent
     return json.dumps({
-        "status": status,
-        "stdout": stdout_output,
-        "stderr": stderr_output,
+        **res,
         "canvas_widget_id": new_id
     }, indent=2)

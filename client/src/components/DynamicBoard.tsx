@@ -1,6 +1,4 @@
-"use client";
-import { Activity, BarChart2, Sigma, TrendingUp, Variable } from 'lucide-react';
-
+import { Activity, BarChart2, Sigma, TrendingUp, Variable, ShoppingCart, TrendingDown, GitBranch } from 'lucide-react';
 import React, { useState, useCallback, useRef } from 'react';
 import ReactFlow, {
     Background,
@@ -101,7 +99,7 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
     const [pendingConn, setPendingConn] = useState<PendingConnection | null>(null);
     const [shouldLayout, setShouldLayout] = useState(false);
     const connectStartRef = useRef<OnConnectStartParams | null>(null);
-    const { getNode } = useReactFlow();
+    const { getNode, setCenter } = useReactFlow();
 
     // ── Edge-driven data propagation ─────────────────────────────────────
     // Uses functional setNodes to avoid stale-closure race conditions.
@@ -321,6 +319,31 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
             setShouldLayout(false);
         }
     }, [shouldLayout, nodes, edges, setNodes, setEdges]);
+
+    // ── Auto-pan to new widgets ───────────────────────────────────────────
+    const prevNodeCountRef = useRef(nodes.length);
+
+    useEffect(() => {
+        if (nodes.length > prevNodeCountRef.current) {
+            // Find the most recently added node
+            const latestNode = nodes[nodes.length - 1];
+            if (latestNode && latestNode.position) {
+                // Determine approximate center of the new node based on its style width/height if available
+                const w = (latestNode.style?.width as number) || 400;
+                const h = (latestNode.style?.height as number) || 300;
+
+                // Add a small delay so ReactFlow finishes rendering the new node into the DOM
+                setTimeout(() => {
+                    setCenter(
+                        latestNode.position.x + (w / 2),
+                        latestNode.position.y + (h / 2) - 50, // slightly offset Y so it's not squished at the top
+                        { zoom: 0.8, duration: 800 }
+                    );
+                }, 50);
+            }
+        }
+        prevNodeCountRef.current = nodes.length;
+    }, [nodes, setCenter]);
 
     // ── Sync incoming widgets → ReactFlow nodes ───────────────────────────
     useEffect(() => {
@@ -546,11 +569,27 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
         setNodes((nds: Node[]) => [...nds, newNode]);
     }, [setNodes]);
 
+    // ── Add Trading / Logic Blocks ─────────────────────────────────────
+    const addActionNode = useCallback((widgetType: string) => {
+        const id = `${widgetType}-${Date.now()}`;
+        const newNode: Node = {
+            id,
+            type: 'customWidget',
+            position: { x: 300 + Math.random() * 200, y: 200 + Math.random() * 200 },
+            style: { width: widgetType === 'conditional' ? 380 : 320, height: widgetType === 'conditional' ? 240 : 340 },
+            data: {
+                widgetData: { widget_type: widgetType },
+                onRemove: () => setNodes((nds: Node[]) => nds.filter(n => n.id !== id)),
+            },
+        };
+        setNodes((nds: Node[]) => [...nds, newNode]);
+    }, [setNodes]);
+
     const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
 
     // Row button style for palette items
     const rowStyle: React.CSSProperties = {
-        display: 'block', width: '100%', textAlign: 'left',
+        display: 'flex', width: '100%', textAlign: 'left', alignItems: 'center',
         padding: '7px 12px', background: 'transparent',
         border: 'none', color: 'var(--text-secondary)',
         fontSize: '0.82rem', cursor: 'pointer',
@@ -659,18 +698,34 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
                                 background: 'var(--bg-elevated)',
                                 border: '1px solid var(--border-subtle)',
                                 borderRadius: '10px', padding: '8px',
-                                minWidth: '220px', zIndex: 9999,
+                                minWidth: '240px', zIndex: 9999,
                                 boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                             }}>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', padding: '4px 8px 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Data Blocks</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', padding: '4px 8px 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Data & Action Blocks</div>
                                 {[{ label: 'Live Stock Price', icon: <TrendingUp size={14} style={{ marginRight: 6 }} />, fn: addLiveStockNode }].map(item => (
-                                    <button key={item.label} onClick={() => { item.fn(); setPaletteOpen(false); }} style={{ ...rowStyle, display: 'flex', alignItems: 'center' }}>
-                                        {item.icon}
-                                        {item.label}
+                                    <button key={item.label} onClick={() => { item.fn(); setPaletteOpen(false); }} style={rowStyle}
+                                        onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'; (e.currentTarget as HTMLElement).style.color = '#fff'; }}
+                                        onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}>
+                                        {item.icon} {item.label}
                                     </button>
                                 ))}
+                                <button onClick={() => { addActionNode('buy_shares'); setPaletteOpen(false); }} style={rowStyle}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'; (e.currentTarget as HTMLElement).style.color = '#3fb950'; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}>
+                                    <ShoppingCart size={14} style={{ marginRight: 6 }} /> Buy Shares
+                                </button>
+                                <button onClick={() => { addActionNode('sell_shares'); setPaletteOpen(false); }} style={rowStyle}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'; (e.currentTarget as HTMLElement).style.color = '#f85149'; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}>
+                                    <TrendingDown size={14} style={{ marginRight: 6 }} /> Sell Shares
+                                </button>
 
-                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', padding: '10px 8px 6px', textTransform: 'uppercase', letterSpacing: '0.06em', borderTop: '1px solid var(--border-subtle)', marginTop: '4px' }}>Computational Blocks</div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', padding: '10px 8px 6px', textTransform: 'uppercase', letterSpacing: '0.06em', borderTop: '1px solid var(--border-subtle)', marginTop: '4px' }}>Computational & Logic</div>
+                                <button onClick={() => { addActionNode('conditional'); setPaletteOpen(false); }} style={rowStyle}
+                                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'; (e.currentTarget as HTMLElement).style.color = '#bc8cff'; }}
+                                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}>
+                                    <GitBranch size={14} style={{ marginRight: 6 }} /> If / Else
+                                </button>
                                 {[
                                     { label: 'Computational (Trend/RSI/etc)', type: 'computational', icon: <Activity size={14} style={{ marginRight: 6 }} /> },
                                     { label: 'Preprocessing (SMA/EMA)', type: 'preprocessing', icon: <Sigma size={14} style={{ marginRight: 6 }} /> },
@@ -678,7 +733,7 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
                                     <button key={item.type} onClick={() => { addComputationalNode(item.type); setPaletteOpen(false); }} style={rowStyle}
                                         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'; (e.currentTarget as HTMLElement).style.color = '#fff'; }}
                                         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
-                                    ><div style={{ display: 'flex', alignItems: 'center' }}>{item.icon}{item.label}</div></button>
+                                    >{item.icon} {item.label}</button>
                                 ))}
                             </div>
                         )}

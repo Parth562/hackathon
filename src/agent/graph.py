@@ -34,7 +34,7 @@ from src.tools.ml_analysis_tools import (
 )
 from src.memory.qdrant_store import MemoryManager
 from src.memory.sqlite_store import StructuredStore
-from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_canvas_connections, update_canvas_widget, redirect_canvas_connection, set_widget_ticker
+from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_canvas_connections, update_canvas_widget, redirect_canvas_connection, set_widget_ticker, buy_shares_on_canvas, sell_shares_on_canvas, add_conditional_node
 from src.tools.alpha_vantage_tools import get_sma, get_ema, get_rsi, get_macd
 
 # Initialize memory stores lazily to prevent PyTorch OOM on import
@@ -91,6 +91,9 @@ tools = [
      update_canvas_widget,
      redirect_canvas_connection,
      set_widget_ticker,
+     buy_shares_on_canvas,
+     sell_shares_on_canvas,
+     add_conditional_node,
      # Math/Preprocessing
      get_sma,
      get_ema,

@@ -5,34 +5,43 @@ import dynamic from "next/dynamic";
 import { Node, Edge } from "reactflow";
 import SessionSidebar from "@/components/SessionSidebar";
 import ChatInterface from "@/components/ChatInterface";
-import { fetchSession, saveBoardState, pushCanvasState, pollCanvasActions } from "@/lib/api";
+import { fetchSession, saveBoardState, pushCanvasState, pollCanvasActions, createSession } from "@/lib/api";
 
 const DynamicBoard = dynamic(() => import("@/components/DynamicBoard"), { ssr: false });
+
+const MAIN_SESSION_KEY = "alexMainSessionId";
 
 export default function Home() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [widgets, setWidgets] = useState<any[]>([]); // Acts as an append-log for new widgets
+  const [widgets, setWidgets] = useState<any[]>([]);
   const [boardData, setBoardData] = useState<{ nodes: Node[]; edges: Edge[] } | null>(null);
   const [restoredMessages, setRestoredMessages] = useState<{ role: string; content: string }[] | null>(null);
+  const sessionInitializedRef = useRef(false);
 
-  // Track if the activeSessionId was just created mid-stream (vs selected from sidebar).
-  // If just created, we must NOT overwrite widgets with the empty saved board.
-  const sessionFromCreationRef = useRef(false);
+  // ── Auto-load or create the single persistent session ──────────────────
+  useEffect(() => {
+    if (sessionInitializedRef.current) return;
+    sessionInitializedRef.current = true;
 
-  const handleSessionCreated = useCallback((newId: string) => {
-    sessionFromCreationRef.current = true;   // mark as "just created"
-    setActiveSessionId(newId);
-    setRestoredMessages(null); // newly created — no restore needed
+    const saved = localStorage.getItem(MAIN_SESSION_KEY);
+    if (saved) {
+      setActiveSessionId(saved);
+    } else {
+      createSession()
+        .then((id) => {
+          localStorage.setItem(MAIN_SESSION_KEY, id);
+          setActiveSessionId(id);
+        })
+        .catch(() => {
+          // Backend not up yet — retry silently next time page loads
+        });
+    }
   }, []);
 
-  // Load board state + messages whenever session changes (skip if just created)
+  // ── Load board state + messages whenever session is set ─────────────────
   useEffect(() => {
-    if (!activeSessionId) { setWidgets([]); setBoardData(null); setRestoredMessages(null); return; }
-    if (sessionFromCreationRef.current) {
-      sessionFromCreationRef.current = false;
-      return;
-    }
+    if (!activeSessionId) return;
     fetchSession(activeSessionId)
       .then((s) => {
         const board = s.board_state as any;
@@ -40,17 +49,23 @@ export default function Home() {
           setBoardData({ nodes: board.nodes, edges: board.edges || [] });
           setWidgets([]);
         } else {
-          // Legacy migration
           const restored = (s.board_state ?? []).map((item: any, i: number) => ({
             id: item._widgetId ?? `restored-${Date.now()}-${i}`,
             data: item,
           }));
           setWidgets(restored);
-          setBoardData(null);
+          setBoardData({ nodes: [], edges: [] }); // Set to empty to signal load complete
         }
         setRestoredMessages(s.messages ?? []);
       })
-      .catch(() => { setWidgets([]); setBoardData(null); setRestoredMessages([]); });
+      .catch(() => {
+        // Session not found (deleted or invalid) — create a fresh one
+        setWidgets([]); setBoardData({ nodes: [], edges: [] }); setRestoredMessages([]);
+        createSession().then((id) => {
+          localStorage.setItem(MAIN_SESSION_KEY, id);
+          setActiveSessionId(id);
+        }).catch(() => { });
+      });
   }, [activeSessionId]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,8 +98,7 @@ export default function Home() {
     setWidgets((prev) => prev.filter((w) => w.id !== id));
   }, []);
 
-  // ── LLM Canvas Action Polling ──────────────────────────
-  // Expose a setter so DynamicBoard's edges can be updated from the outside
+  // ── LLM Canvas Action Polling ────────────────────────────────────────────
   const [pendingCanvasActions, setPendingCanvasActions] = useState<any[]>([]);
 
   useEffect(() => {
@@ -96,15 +110,13 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [activeSessionId]);
 
+  // Called by ChatInterface when a new session is auto-created on first message
+  const handleSessionCreated = useCallback((newId: string) => {
+    localStorage.setItem(MAIN_SESSION_KEY, newId);
+    setActiveSessionId(newId);
+  }, []);
 
-
-  const handleNewChat = () => {
-    setActiveSessionId(null);
-    setWidgets([]);
-    setRestoredMessages(null);
-  };
-
-  // ── Resizable Chat Panel ─────────────────────────
+  // ── Resizable Chat Panel ─────────────────────────────────────────────────
   const [chatWidth, setChatWidth] = useState(380);
   const isDraggingRef = useRef(false);
 
@@ -112,18 +124,14 @@ export default function Home() {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current) return;
       const newWidth = document.body.clientWidth - e.clientX;
-      if (newWidth >= 300 && newWidth <= 800) {
-        setChatWidth(newWidth);
-      }
+      if (newWidth >= 300 && newWidth <= 800) setChatWidth(newWidth);
     };
-
     const handleMouseUp = () => {
       if (isDraggingRef.current) {
         isDraggingRef.current = false;
         document.body.style.cursor = "";
       }
     };
-
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
     return () => {
@@ -143,29 +151,34 @@ export default function Home() {
 
       {/* ── Session Sidebar ──────────────────────────── */}
       <SessionSidebar
-        activeSessionId={activeSessionId}
-        onSelectSession={setActiveSessionId}
-        onNewChat={handleNewChat}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
       />
 
-      {/* ── Canvas / Board ─────────────────────────────────── */}
-      <div style={{ flex: 1, height: "100%", overflow: "hidden", position: "relative" }}>
-        <DynamicBoard
-          key={activeSessionId ?? "no-session"}
-          widgets={widgets}
-          initialNodes={boardData?.nodes}
-          initialEdges={boardData?.edges}
-          onBoardChange={handleBoardChange}
-          onRemoveWidget={removeWidget}
-          sessionId={activeSessionId}
-          pendingActions={pendingCanvasActions}
-          onActionsConsumed={() => setPendingCanvasActions([])}
-        />
+      {/* ── Canvas / Board ────────────────────────────── */}
+      <div style={{ flex: 1, height: "100%", overflow: "hidden", position: "relative", background: "var(--bg-base)" }}>
+        {activeSessionId && boardData === null ? (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--text-muted)" }}>
+            <div className="spinner" style={{ marginBottom: "16px", border: "2px solid var(--border-subtle)", borderTopColor: "var(--primary)", borderRadius: "50%", width: "24px", height: "24px", animation: "spin 1s linear infinite" }} />
+            <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+            <p style={{ fontFamily: "var(--font-base)", fontSize: "0.9rem" }}>Loading Canvas...</p>
+          </div>
+        ) : (
+          <DynamicBoard
+            key={activeSessionId ?? "no-session"}
+            widgets={widgets}
+            initialNodes={boardData?.nodes}
+            initialEdges={boardData?.edges}
+            onBoardChange={handleBoardChange}
+            onRemoveWidget={removeWidget}
+            sessionId={activeSessionId}
+            pendingActions={pendingCanvasActions}
+            onActionsConsumed={() => setPendingCanvasActions([])}
+          />
+        )}
       </div>
 
-      {/* ── Drag Handle ─────────────────────────────────── */}
+      {/* ── Drag Handle ───────────────────────────────── */}
       <div
         onMouseDown={handleDragStart}
         style={{
@@ -179,7 +192,7 @@ export default function Home() {
         onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
       />
 
-      {/* ── Chat Panel ─────────────────────────────────── */}
+      {/* ── Chat Panel ───────────────────────────────── */}
       <div style={{
         width: `${chatWidth}px`,
         minWidth: "300px",

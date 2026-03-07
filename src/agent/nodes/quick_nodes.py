@@ -56,8 +56,9 @@ async def read_data_node(state: AgentState, config: RunnableConfig) -> dict:
     from src.tools.finance_tools import get_financial_statements, get_key_metrics
     from src.tools.groww_tools import get_live_stock_price_groww, show_live_stock_widget
     from src.tools.portfolio_tools import analyze_portfolio
-    from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets
+    from src.tools.canvas_tools import get_canvas_state, set_canvas_variable, connect_canvas_widgets, disconnect_canvas_widgets, add_canvas_widget, remove_canvas_widget, list_available_widgets, buy_shares_on_canvas, sell_shares_on_canvas, add_conditional_node
     from src.tools.ticker_tools import resolve_ticker
+    from src.tools.sandbox_tools import execute_python_code
 
     tools = [
         get_live_stock_price_groww,
@@ -72,7 +73,11 @@ async def read_data_node(state: AgentState, config: RunnableConfig) -> dict:
         add_canvas_widget,
         remove_canvas_widget,
         list_available_widgets,
+        buy_shares_on_canvas,
+        sell_shares_on_canvas,
+        add_conditional_node,
         resolve_ticker,
+        execute_python_code,
     ]
     
     session_id = state.get("session_id", "unknown")
@@ -93,6 +98,14 @@ CANVAS FLOW CREATION (when user asks to "create a flow", "connect widgets", "bui
 5. Use set_canvas_variable to set or update any named variables.
 6. Use remove_canvas_widget to delete blocks.
 7. Explain what you built in plain language.
+
+PYTHON CODE EXECUTION:
+- If the user asks for Python code, scripts, or custom mathematical logic, USE the `execute_python_code` tool.
+- VARIABLE INJECTION: You can pass an `inputs` dict to inject variables (e.g. `inputs={{'v': 100}}`). The script can then use the variable `v`.
+- REACTIVE PIPELINES: The Sandbox widget has input ports `in-a` through `in-d`. If connected on canvas, the script re-runs automatically on variable changes.
+- OUTPUT PIPING & MULTI-VARS: The script result is piped to `out-result`. Want to push specific values to multiple variable widgets? Print a JSON string like `print(json.dumps({{"out-a": val1, "out-b": val2}}))`.
+- ERROR HANDLING: If `execute_python_code` returns an error, DO NOT GIVE UP. Fix your code and try again (up to 2 times).
+- KEEP RESPONSES CONCISE: The user can see the widget on the canvas. Do not write a massive essay in chat. Let the widget do the talking.
 
 WIDGET DISPLAY (when user asks to "show", "add to canvas", "display"):
 - Call show_live_stock_widget for live price cards.

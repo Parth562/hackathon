@@ -12,7 +12,7 @@ import type { Node, Edge } from 'reactflow';
 
 // ── Port types ────────────────────────────────────────────────────────────────
 
-export type PortType = 'ticker' | 'number' | 'string' | 'table' | 'any';
+export type PortType = 'ticker' | 'number' | 'string' | 'table' | 'boolean' | 'any';
 
 export interface CanvasPort {
     id: string;

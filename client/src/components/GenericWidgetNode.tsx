@@ -23,6 +23,9 @@ import ComputationalWidget from './ComputationalWidget';
 import MathWidget from './MathWidget';
 import NetworkGraphWidget from './NetworkGraphWidget';
 import SandboxWidget from './SandboxWidget';
+import BuySharesWidget from './BuySharesWidget';
+import SellSharesWidget from './SellSharesWidget';
+import ConditionalWidget from './ConditionalWidget';
 import WidgetSettingsDrawer, { type EdgeBinding } from './WidgetSettingsDrawer';
 import { getSchema, PORT_COLORS, PortDef } from '@/lib/widgetSchema';
 
@@ -148,7 +151,13 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
     } else if (widgetType === 'network_graph') {
         content = <NetworkGraphWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'sandbox') {
-        content = <SandboxWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
+        content = <SandboxWidget id={id} data={{ widgetData }} onClose={handleClose} onOutputChange={handleOutputChange} />;
+    } else if (widgetType === 'buy_shares') {
+        content = <BuySharesWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
+    } else if (widgetType === 'sell_shares') {
+        content = <SellSharesWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
+    } else if (widgetType === 'conditional') {
+        content = <ConditionalWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else {
         const title = widgetType ? widgetType.replace('_', ' ') : 'Structured Analysis';
         content = (

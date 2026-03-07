@@ -27,6 +27,13 @@ export async function fetchModels(): Promise<Array<{ id: string; name: string; p
 }
 
 // ── Sessions ──────────────────────────────────────────
+export async function createSession(): Promise<string> {
+    const res = await fetch(`${BASE}/api/sessions/init`, { method: "POST" });
+    if (!res.ok) throw new Error("Failed to create session");
+    const data = await res.json();
+    return data.session_id as string;
+}
+
 export async function fetchSessions(): Promise<SessionMeta[]> {
     const res = await fetch(`${BASE}/api/sessions`);
     const parsed = SessionListSchema.parse(await res.json());
@@ -96,9 +103,46 @@ export async function pushCanvasState(sessionId: string, nodes: unknown[], edges
     }).catch(() => { /* ignore network errors silently */ });
 }
 
+export async function getCanvasSnapshot(sessionId: string): Promise<{ nodes: any[]; edges: any[] }> {
+    const res = await fetch(`${BASE}/api/canvas/${sessionId}/snapshot`).catch(() => null);
+    if (!res || !res.ok) return { nodes: [], edges: [] };
+    return res.json();
+}
+
 export async function pollCanvasActions(sessionId: string): Promise<any[]> {
     const res = await fetch(`${BASE}/api/canvas/${sessionId}/actions`).catch(() => null);
     if (!res || !res.ok) return [];
     const data = await res.json().catch(() => ({ actions: [] }));
     return data.actions ?? [];
 }
+
+// ── Portfolio & Optimization ──────────────────────────
+export async function fetchPortfolio(): Promise<any[]> {
+    const res = await fetch(`${BASE}/api/portfolio`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.portfolio ?? [];
+}
+
+export async function fetchPortfolioSuggestions(): Promise<any[]> {
+    const res = await fetch(`${BASE}/api/portfolio/suggestions`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.suggestions ?? [];
+}
+
+export async function approveSuggestion(id: string) {
+    const res = await fetch(`${BASE}/api/portfolio/suggestions/${id}/approve`, { method: "POST" });
+    if (!res.ok) throw new Error("Approval failed");
+}
+
+export async function declineSuggestion(id: string) {
+    const res = await fetch(`${BASE}/api/portfolio/suggestions/${id}/decline`, { method: "POST" });
+    if (!res.ok) throw new Error("Decline failed");
+}
+
+export async function triggerPortfolioOptimization() {
+    const res = await fetch(`${BASE}/api/portfolio/optimize`, { method: "POST" });
+    if (!res.ok) throw new Error("Trigger optimization failed");
+}
+
