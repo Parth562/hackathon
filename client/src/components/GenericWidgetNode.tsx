@@ -105,52 +105,63 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
     };
 
     let content = null;
+    const handleOpenSettings = () => setSettingsOpen(true);
+
     if (widgetData?.chart_type || widgetType === 'chart') {
-        content = <ChartWidget data={widgetData} onClose={handleClose} />;
+        content = <ChartWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'dcf') {
-        content = <DcfWidget data={widgetData} onClose={handleClose} />;
+        content = <DcfWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'insider_trading') {
-        content = <InsiderWidget data={widgetData} onClose={handleClose} />;
+        content = <InsiderWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'ecosystem') {
-        content = <EcosystemWidget data={widgetData} onClose={handleClose} />;
+        content = <EcosystemWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'supply_chain_impact') {
-        content = <SupplyChainWidget data={widgetData} onClose={handleClose} />;
+        content = <SupplyChainWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'custom') {
-        content = <CustomWidget data={widgetData} onClose={handleClose} />;
+        content = <CustomWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'portfolio_analysis') {
-        content = <PortfolioWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+        content = <PortfolioWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'kpi_dashboard') {
-        content = <KpiDashboardWidget data={widgetData} onClose={handleClose} />;
+        content = <KpiDashboardWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'peer_benchmark') {
-        content = <PeerBenchmarkWidget data={widgetData} onClose={handleClose} />;
+        content = <PeerBenchmarkWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'thesis') {
-        content = <ThesisWidget data={widgetData} onClose={handleClose} />;
+        content = <ThesisWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'risk_score') {
-        content = <RiskScoreWidget data={widgetData} onClose={handleClose} />;
+        content = <RiskScoreWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'scenario') {
-        content = <ScenarioWidget data={widgetData} onClose={handleClose} />;
+        content = <ScenarioWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'prediction') {
-        content = <PredictionWidget data={widgetData} onClose={handleClose} />;
+        content = <PredictionWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'table') {
-        content = <TableWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+        content = <TableWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'live_stock') {
-        content = <LiveStockWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+        content = <LiveStockWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'preprocessing') {
-        content = <PreprocessingWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+        content = <PreprocessingWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'computational') {
-        content = <ComputationalWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+        content = <ComputationalWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'math') {
-        content = <MathWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
+        content = <MathWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else {
         const title = widgetType ? widgetType.replace('_', ' ') : 'Structured Analysis';
         content = (
             <div className="glass-panel" style={{ height: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
-                <button
-                    onClick={handleClose}
-                    style={{ position: 'absolute', top: '12px', right: '16px', background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '18px', zIndex: 100 }}
-                >
-                    ✕
-                </button>
+                <div style={{ position: 'absolute', top: '12px', right: '16px', display: 'flex', gap: '8px', zIndex: 100 }}>
+                    <button
+                        title="Widget Settings"
+                        onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
+                        style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                    >
+                        <Settings size={18} />
+                    </button>
+                    <button
+                        onClick={handleClose}
+                        style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '18px' }}
+                    >
+                        ✕
+                    </button>
+                </div>
                 <h3 className="drag-handle" style={{ color: 'var(--primary)', marginBottom: '16px', textTransform: 'capitalize', cursor: 'grab', display: 'flex', alignItems: 'center' }}>
                     {title}
                 </h3>
@@ -167,33 +178,9 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
                 isVisible={selected}
                 minWidth={300}
                 minHeight={200}
-                handleStyle={{ width: 10, height: 10, borderRadius: 5, background: 'var(--accent)', border: '2px solid #fff' }}
+                handleStyle={{ width: 10, height: 10, borderRadius: 5, background: 'var(--accent)', border: '2px solid var(--bg-elevated)' }}
                 lineStyle={{ border: '2px dashed var(--accent)' }}
             />
-
-            {/* ⚙️ Settings button — top right corner of node */}
-            <button
-                title="Widget Settings"
-                onClick={(e) => { e.stopPropagation(); setSettingsOpen(true); }}
-                style={{
-                    position: "absolute", top: "8px", right: "8px",
-                    zIndex: 200,
-                    background: "var(--bg-elevated)",
-                    border: "1px solid var(--border-subtle)",
-                    borderRadius: "6px",
-                    padding: "4px",
-                    cursor: "pointer",
-                    color: "var(--text-muted)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    opacity: selected ? 1 : 0,
-                    transition: "opacity 0.15s, color 0.15s",
-                    pointerEvents: selected ? "all" : "none",
-                }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = "var(--primary)")}
-                onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-muted)")}
-            >
-                <Settings size={13} />
-            </button>
 
             {/* ↙ Input handles (left side) */}
             {inputs.map((port, i) => {
@@ -210,7 +197,7 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
                             width: "12px", height: "12px",
                             borderRadius: "50%",
                             background: PORT_COLORS[port.type],
-                            border: "2.5px solid var(--bg-sidebar)",
+                            border: "2.5px solid var(--bg-elevated)",
                             top: `${pct}%`,
                         }}
                     />
@@ -232,7 +219,7 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
                             width: "12px", height: "12px",
                             borderRadius: "50%",
                             background: PORT_COLORS[port.type],
-                            border: "2.5px solid var(--bg-sidebar)",
+                            border: "2.5px solid var(--bg-elevated)",
                             top: `${pct}%`,
                         }}
                     />

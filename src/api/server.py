@@ -115,7 +115,7 @@ async def upload_document(file: UploadFile = File(...)):
         from src.tools.document_tools import get_document_store
         
         texts = [chunk.page_content for chunk in chunks]
-        metadatas = [{"source": file.filename, **(chunk.metadata if chunk.metadata else {})} for chunk in chunks]
+        metadatas = [{**(chunk.metadata if chunk.metadata else {}), "source": file.filename} for chunk in chunks]
         
         await asyncio.to_thread(get_document_store().store_memories_batch, texts, metadatas=metadatas)
             

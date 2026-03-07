@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, StopCircle, Layers, Library, MessageSquare, Search, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Send, Paperclip, StopCircle, Layers, Library, MessageSquare, Search, X, ChevronDown, ChevronUp, Check, XCircle, AlertTriangle, Wrench, Brain, MessageCircle, FileText } from "lucide-react";
 import { Button, Spinner } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Badge, StatusDot } from "./ui/Badge";
@@ -29,8 +29,8 @@ interface Props {
     restoredMessages?: { role: string; content: string }[] | null;
 }
 
-const PREF_MODEL_KEY = "KEN_model_pref";
-const PREF_MODE_KEY = "KEN_mode_pref";
+const PREF_MODEL_KEY = "ALEX_model_pref";
+const PREF_MODE_KEY = "ALEX_mode_pref";
 
 // ── Components ────────────────────────────────────────
 
@@ -90,8 +90,8 @@ const ThinkingLog = ({ events }: { events: any[] }) => {
                     {groupedEvents.map((ev, i) => (
                         <div key={i} style={{ fontSize: "0.75rem", lineHeight: 1.5 }}>
                             {ev.kind === "tool_start" && (
-                                <div style={{ color: "var(--primary)", fontWeight: 500 }}>
-                                    <span style={{ marginRight: "6px" }}>🛠️</span>
+                                <div style={{ color: "var(--primary)", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
+                                    <Wrench size={14} />
                                     Calling: <code style={{ color: "var(--text-primary)", background: "rgba(255,255,255,0.05)", padding: "2px 4px", borderRadius: "3px" }}>{ev.tool}</code>
                                     <pre style={{
                                         fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "6px",
@@ -103,8 +103,8 @@ const ThinkingLog = ({ events }: { events: any[] }) => {
                                 </div>
                             )}
                             {ev.kind === "tool_end" && (
-                                <div style={{ color: "#4ade80", fontWeight: 500 }}>
-                                    <span style={{ marginRight: "6px" }}>✅</span>
+                                <div style={{ color: "#4ade80", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
+                                    <Check size={14} color="#4ade80" />
                                     Finished: <code style={{ color: "var(--text-primary)", background: "rgba(255,255,255,0.05)", padding: "2px 4px", borderRadius: "3px" }}>{ev.tool}</code>
                                     <pre style={{
                                         fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "6px",
@@ -230,9 +230,9 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
         try {
             await uploadDocument(file);
             setUploadedDocs((prev) => prev.includes(file.name) ? prev : [...prev, file.name]);
-            addMessage({ role: "agent", content: `✅ **${file.name}** uploaded and indexed. Ask me anything about it!` });
+            addMessage({ role: "agent", content: `**${file.name}** uploaded and indexed. Ask me anything about it!` });
         } catch {
-            addMessage({ role: "agent", content: `❌ Failed to upload **${file.name}**. Is the backend running?` });
+            addMessage({ role: "agent", content: `Failed to upload **${file.name}**. Is the backend running?` });
         } finally {
             setUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
@@ -384,7 +384,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                             );
                         }
                     } else if (event.type === "error") {
-                        finalContent = "⚠️ " + event.content;
+                        finalContent = "Error: " + event.content;
                         setTokenPreviewLines([]);
                     }
                 }
@@ -448,7 +448,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                     onNewWidget({ type: "table", title, markdown: block, _cols: cols, _rows: rows });
                     finalContent = finalContent.replace(
                         fullMatch,
-                        `\n\n> 📊 **${title}** — *pinned to canvas*\n`
+                        `\n\n> **${title}** — *pinned to canvas*\n`
                     );
                 }
                 // Tables NOT in top-2 stay rendered in chat as regular markdown
@@ -473,7 +473,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
             if (createdSessionId) onSessionCreated(createdSessionId);
         } catch (e: any) {
             if (e.name !== "AbortError") {
-                addMessage({ role: "agent", content: "❌ Failed to connect to the backend. Is the FastAPI server running on port 8261?" });
+                addMessage({ role: "agent", content: "Failed to connect to the backend. Is the FastAPI server running on port 8261?" });
             }
         } finally {
             setLoading(false);
@@ -500,7 +500,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                     <MessageSquare size={18} color="var(--primary)" />
                     <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text-primary)" }}>Chat</span>
                     {sessionId && (
-                        <Badge variant="muted">{mode === "QUICK" ? "⚡ Quick" : "🧠 Deep"}</Badge>
+                        <Badge variant="muted">{mode === "QUICK" ? "Quick" : mode === "CONTEXT" ? "Context" : "Deep"}</Badge>
                     )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -575,7 +575,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                     )}
                     {mode === "DEEP" && (
                         <p style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.5 }}>
-                            🧠 <strong>Deep mode</strong> enables comprehensive analysis: DCF modelling, peer benchmarking, and thesis generation. Responses may take longer.
+                            <Brain size={14} style={{ marginRight: "6px" }} /> <strong>Deep mode</strong> enables comprehensive analysis: DCF modelling, peer benchmarking, and thesis generation. Responses may take longer.
                         </p>
                     )}
                 </div>
@@ -617,7 +617,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
 
                     <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
                         {uploadedDocs.length === 0 ? (
-                            <EmptyState icon="📄" title="No documents yet" description="Upload PDFs or TXTs to give the agent company-specific context." />
+                            <EmptyState icon={<FileText size={24} />} title="No documents yet" description="Upload PDFs or TXTs to give the agent company-specific context." />
                         ) : uploadedDocs.map((doc) => (
                             <div key={doc} style={{
                                 display: "flex",
@@ -645,8 +645,8 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                 <div style={{ flex: 1, overflowY: "auto", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
                     {messages.length === 0 && (
                         <EmptyState
-                            icon="💬"
-                            title="How can KEN help?"
+                            icon={<MessageCircle size={24} />}
+                            title="How can Alex help?"
                             description={'Ask me to analyse stocks, build a DCF model, or say "I bought 100 shares of AAPL".'}
                         />
                     )}

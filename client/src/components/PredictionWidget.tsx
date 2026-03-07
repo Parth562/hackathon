@@ -1,6 +1,6 @@
 "use client";
 import React from "react";
-import { X } from "lucide-react";
+import { X, AlertTriangle } from "lucide-react";
 import {
     ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip,
     Legend, ResponsiveContainer, ReferenceLine,
@@ -73,10 +73,10 @@ export default function PredictionWidget({ data, onClose }: Props) {
                     />
                     <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
 
-                    {divider && <ReferenceLine x={divider} stroke="var(--border-strong)" strokeDasharray="4 4" label={{ value: "Forecast →", fill: "var(--text-muted)", fontSize: 10, position: "insideTopRight" }} />}
+                    {divider && <ReferenceLine x={divider} stroke="var(--border-strong)" strokeDasharray="4 4" label={{ value: "Forecast \u2192", fill: "var(--text-muted)", fontSize: 10, position: "insideTopRight" }} />}
 
                     {/* Confidence band */}
-                    <Area dataKey="upper" stroke="none" fill="rgba(88,166,255,0.12)" name="Upper band" legendType="none" connectNulls />
+                    <Area dataKey="upper" stroke="none" fill="rgba(188, 179, 164, 0.15)" name="Upper band" legendType="none" connectNulls />
                     <Area dataKey="lower" stroke="none" fill="var(--bg-base)" name="Lower band" legendType="none" connectNulls />
 
                     {/* Lines */}
@@ -85,9 +85,9 @@ export default function PredictionWidget({ data, onClose }: Props) {
                 </ComposedChart>
             </ResponsiveContainer>
 
-            <p style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: 8 }}>
-                ⚠️ Forecast is a simplified linear regression model (not investment advice).
-            </p>
+            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)", marginTop: 8, display: "flex", alignItems: "center", gap: "4px" }}>
+                <AlertTriangle size={12} /> Forecast is a simplified linear regression model (not investment advice).
+            </div>
         </div>
     );
 }

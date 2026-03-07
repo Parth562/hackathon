@@ -1,4 +1,5 @@
 "use client";
+import { BarChart2 } from 'lucide-react';
 
 import React, { useState, useCallback, useRef } from 'react';
 import ReactFlow, {
@@ -573,7 +574,7 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
                         background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: '1.8rem',
-                    }}>📊</div>
+                    }}><BarChart2 size={28} /></div>
                     <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--text-secondary)', margin: 0 }}>
                         Interactive Canvas
                     </h2>
@@ -608,11 +609,7 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
                 <Background color="#1e2530" gap={24} size={1} />
                 <Controls
                     showInteractive={false}
-                    style={{
-                        display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px',
-                        background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)',
-                        borderRadius: '8px',
-                    }}
+                    className="custom-flow-controls"
                 />
 
                 <Panel position="top-right">

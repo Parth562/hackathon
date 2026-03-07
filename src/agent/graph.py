@@ -171,9 +171,22 @@ def create_agent_graph() -> StateGraph:
     # ANALYSIS route short-circuits planner/research/data
     builder.add_edge("analysis", "critic")
     
-    # RESEARCH route goes through the full deep pipeline
+    def route_after_research(state: AgentState) -> str:
+        """If user requested CONTEXT mode, skip Data and Analysis entirely."""
+        if state.get("forced_mode") == "CONTEXT":
+            return "report"
+        return "data"
+
+    # RESEARCH route goes through the full deep pipeline (or short-circuits for CONTEXT)
     builder.add_edge("planner",  "research")
-    builder.add_edge("research", "data")
+    builder.add_conditional_edges(
+        "research",
+        route_after_research,
+        {
+            "data": "data",
+            "report": "report"
+        }
+    )
     builder.add_edge("data",     "analysis")
     
     # Standard tail for deep paths

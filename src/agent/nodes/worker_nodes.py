@@ -55,6 +55,7 @@ async def research_node(state: AgentState) -> AgentState:
     tools = [search_web, scrape_webpage, search_company_documents, search_pdf_content]
     prompt = """Gather qualitative info, news, company documents, or context needed to answer the query.
 For deep analysis, prefer the `search_pdf_content` tool to find institutional reports or official PDF announcements using Google Dorking.
+If the user asks about an upcoming IPO or an unlisted SME company (e.g. "Srinibas Pradhan IPO"), it will NOT have a stock ticker. You MUST use `search_web` to find the IPO details, and then use `scrape_webpage` on the top search results to extract the actual text.
 Do not do math or pull raw metrics. Focus on narrative, catalysts, and events."""
     
     result = await _run_sub_agent(state, "RESEARCH", prompt, tools)
@@ -69,9 +70,12 @@ Do not do math or pull raw metrics. Focus on narrative, catalysts, and events.""
 # ==========================================
 async def data_node(state: AgentState) -> AgentState:
     from src.tools.finance_tools import get_stock_price, get_financial_statements, get_key_metrics, get_options_data
+    from src.tools.scraping_tools import search_web, scrape_webpage
     
-    tools = [get_stock_price, get_financial_statements, get_key_metrics, get_options_data]
-    prompt = "Fetch EXACT numerical financial data (price, balance sheet, metrics) using your tools. Do not analyze. Just provide the raw verified data requested."
+    tools = [get_stock_price, get_financial_statements, get_key_metrics, get_options_data, search_web, scrape_webpage]
+    prompt = """Fetch EXACT numerical financial data (price, balance sheet, metrics) using your tools. Do not analyze. Just provide the raw verified data requested.
+If the company is publicly traded, use yfinance tools (get_stock_price, get_financial_statements).
+If the company is an upcoming IPO, SME IPO, or unlisted (e.g. "Srinibas Pradhan"), yfinance WILL FAIL. Instead, you MUST use `search_web` with good keywords (e.g. "[Company] IPO financial revenue last 3 quarters") and then use `scrape_webpage` to read the exact numbers from the DRHP or IPO articles."""
     
     result = await _run_sub_agent(state, "DATA", prompt, tools)
     return {

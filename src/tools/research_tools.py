@@ -2,7 +2,7 @@ from typing import List, Dict, Any
 import requests
 import io
 from PyPDF2 import PdfReader
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from langchain_core.tools import tool
 
 @tool

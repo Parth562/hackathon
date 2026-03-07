@@ -9,9 +9,10 @@ import {
 interface ChartWidgetProps {
     data: any;
     onClose: () => void;
+    onOpenSettings?: () => void;
 }
 
-export default function ChartWidget({ data, onClose }: ChartWidgetProps) {
+export default function ChartWidget({ data, onClose, onOpenSettings }: ChartWidgetProps) {
     // Determine if this is a comparison chart or advanced single stock chart
     const isComparison = data.chart_type === "comparison";
     const isPie = data.chart_type === "pie";
@@ -36,8 +37,16 @@ export default function ChartWidget({ data, onClose }: ChartWidgetProps) {
 
     if (isGenericSeries) {
         chartContent = (
-            <div style={{ width: '100%' }}>
-                <h3 style={{ textAlign: 'center', marginBottom: '16px', color: 'var(--primary)' }}>{data.title || 'Data View'}</h3>
+            <div style={{ width: '100%', position: 'relative' }}>
+                <div style={{ position: 'absolute', top: '-6px', right: '0px', display: 'flex', gap: '8px', zIndex: 10 }}>
+                    {onOpenSettings && (
+                        <button onClick={onOpenSettings} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
+                    )}
+                    <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '18px' }}>✕</button>
+                </div>
+                <h3 className="drag-handle" style={{ textAlign: 'center', marginBottom: '16px', color: 'var(--primary)', cursor: 'grab' }}>{data.title || 'Data View'}</h3>
                 <ResponsiveContainer width="100%" height={350}>
                     <LineChart data={data.data} margin={{ top: 10, right: 30, left: 20, bottom: 5 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" vertical={false} />

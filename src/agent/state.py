@@ -23,6 +23,7 @@ class AgentState(TypedDict):
     # Internal agent scratchpad / tracking fields
     # Quick mode vs Deep mode determination
     research_mode: Optional[str] 
+    forced_mode: Optional[str]
     
     # 4-tier routing intent: READ_DATA, WRITE_DATA, ANALYSIS, RESEARCH
     intent: Optional[str] 

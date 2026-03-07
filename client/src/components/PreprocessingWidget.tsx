@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { Calculator } from 'lucide-react';
+import { Calculator, Zap } from 'lucide-react';
 import { computeIndicator, type IndicatorId, type OHLCV } from '@/lib/indicatorEngine';
 
 const FUNCTIONS: IndicatorId[] = ['SMA', 'EMA', 'WMA', 'DEMA', 'TEMA', 'TRIMA'];
@@ -28,9 +28,10 @@ interface PreprocessingWidgetProps {
     };
     onClose?: (e: React.MouseEvent) => void;
     onOutputChange?: (updates: Record<string, any>) => void;
+    onOpenSettings?: () => void;
 }
 
-export default function PreprocessingWidget({ data, onClose, onOutputChange }: PreprocessingWidgetProps) {
+export default function PreprocessingWidget({ data, onClose, onOutputChange, onOpenSettings }: PreprocessingWidgetProps) {
     const [fn, setFn] = useState<IndicatorId>((data.function as IndicatorId) || 'SMA');
     const [period, setPeriod] = useState(data.time_period || 20);
     const [interval, setInterval] = useState(data.interval || 'daily');
@@ -91,10 +92,22 @@ export default function PreprocessingWidget({ data, onClose, onOutputChange }: P
                 <h3 style={{ margin: 0, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1rem' }}>
                     <Calculator size={17} />
                     Math Preprocessing
-                    <span style={{ fontSize: '0.68rem', color: '#3fb950', marginLeft: 2 }}>⚡ Local</span>
+                    <span style={{ fontSize: '0.68rem', color: '#3fb950', marginLeft: 2, display: 'flex', alignItems: 'center', gap: '2px' }}><Zap size={10} /> Local</span>
                     {ticker && <span style={{ fontSize: '0.7rem', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', color: 'var(--accent)' }}>{ticker}</span>}
                 </h3>
-                {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '18px' }}>✕</button>}
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    {onOpenSettings && (
+                        <button
+                            onClick={onOpenSettings}
+                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center" }}
+                            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--primary)")}
+                            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--text-muted)")}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
+                    )}
+                    {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '18px' }}>✕</button>}
+                </div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '16px' }}>

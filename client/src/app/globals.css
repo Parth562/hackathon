@@ -1,33 +1,33 @@
 :root {
   /* Core palette */
-  --bg-base: #080c12;
-  --bg-sidebar: #0d1117;
-  --bg-surface: #111720;
-  --bg-elevated: #161d29;
-  --bg-hover: rgba(255, 255, 255, 0.04);
-  --bg-active: rgba(88, 166, 255, 0.1);
+  --bg-base: #2c2c2c;
+  --bg-sidebar: rgba(0, 0, 0, 0.2);
+  --bg-surface: rgba(255, 255, 255, 0.05);
+  --bg-elevated: rgba(0, 0, 0, 0.3);
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --bg-active: rgba(188, 179, 164, 0.15);
 
   /* Borders */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.18);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.15);
+  --border-strong: rgba(255, 255, 255, 0.25);
 
   /* Brand colors */
-  --primary: #58a6ff;
-  --primary-dim: rgba(88, 166, 255, 0.15);
-  --accent: #b794f4;
-  --accent-dim: rgba(183, 148, 244, 0.12);
-  --green: #3fb950;
-  --green-dim: rgba(63, 185, 80, 0.12);
-  --red: #f85149;
-  --red-dim: rgba(248, 81, 73, 0.12);
-  --amber: #e3b341;
-  --amber-dim: rgba(227, 179, 65, 0.12);
+  --primary: #BCB3A4;
+  --primary-dim: rgba(188, 179, 164, 0.2);
+  --accent: #d4a373;
+  --accent-dim: rgba(212, 163, 115, 0.12);
+  --green: #81b29a;
+  --green-dim: rgba(129, 178, 154, 0.12);
+  --red: #e07a5f;
+  --red-dim: rgba(224, 122, 95, 0.12);
+  --amber: #f2cc8f;
+  --amber-dim: rgba(242, 204, 143, 0.12);
 
   /* Text */
-  --text-primary: #e6edf3;
-  --text-secondary: #8b949e;
-  --text-muted: #4d5566;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.7);
+  --text-muted: rgba(255, 255, 255, 0.45);
 
   /* Effects */
   --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -40,7 +40,7 @@
   --radius-lg: 18px;
   --radius-xl: 24px;
 
-  --font-base: var(--font-outfit), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-base: var(--font-roboto), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 /* ── Reset ──────────────────────────────────────────── */
@@ -69,11 +69,13 @@ body {
 
 /* ── Glassmorphic Panel ────────────────────────────── */
 .glass-panel {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-subtle);
+  background: rgba(30, 30, 30, 0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(188, 179, 164, 0.15);
   border-radius: var(--radius-lg);
   padding: 20px;
-  box-shadow: var(--shadow-sm);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   animation: fadeInUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
@@ -105,6 +107,7 @@ body {
     opacity: 0;
     transform: translateX(24px);
   }
+
   to {
     opacity: 1;
     transform: translateX(0);
@@ -140,7 +143,7 @@ body {
   font-size: 1.4rem;
   font-weight: 700;
   letter-spacing: -0.03em;
-  background: linear-gradient(135deg, #e6edf3 0%, #8b949e 100%);
+  background: linear-gradient(135deg, #ffffff 0%, var(--primary) 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;

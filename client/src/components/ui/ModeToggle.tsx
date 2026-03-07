@@ -3,8 +3,9 @@
  */
 "use client";
 import React from "react";
+import { Zap, Search, Brain } from "lucide-react";
 
-export type ResearchMode = "QUICK" | "DEEP";
+export type ResearchMode = "QUICK" | "CONTEXT" | "DEEP";
 
 interface ModeToggleProps {
     value: ResearchMode;
@@ -14,7 +15,7 @@ interface ModeToggleProps {
 export function ModeToggle({ value, onChange }: ModeToggleProps) {
     return (
         <div className="mode-toggle" role="group" aria-label="Research depth">
-            {(["QUICK", "DEEP"] as ResearchMode[]).map((mode) => {
+            {(["QUICK", "CONTEXT", "DEEP"] as ResearchMode[]).map((mode) => {
                 const isActive = value === mode;
                 return (
                     <button
@@ -23,12 +24,14 @@ export function ModeToggle({ value, onChange }: ModeToggleProps) {
                         role="radio"
                         aria-checked={isActive}
                         onClick={() => onChange(mode)}
-                        className={`mode-toggle-btn${isActive ? " active" + (mode === "DEEP" ? " deep" : "") : ""}`}
+                        className={`mode-toggle-btn${isActive ? " active" + (mode === "DEEP" ? " deep" : mode === "CONTEXT" ? " context" : "") : ""}`}
                     >
                         {mode === "QUICK" ? (
-                            <><span aria-hidden>⚡</span> Quick</>
+                            <><Zap size={14} className="opacity-70" /> Quick</>
+                        ) : mode === "CONTEXT" ? (
+                            <><Search size={14} className="opacity-70" /> Context</>
                         ) : (
-                            <><span aria-hidden>🧠</span> Deep</>
+                            <><Brain size={14} className="opacity-70" /> Deep</>
                         )}
                     </button>
                 );

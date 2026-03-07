@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useRef } from "react";
 import { PortDef, PORT_COLORS, isCompatible } from "@/lib/widgetSchema";
+import { ArrowRight } from "lucide-react";
 
 interface Props {
     x: number;
@@ -105,7 +106,7 @@ export default function ConnectionMenu({ x, y, sourceOutputs, targetInputs, onCo
                             {src.label}
                         </span>
 
-                        <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>→</span>
+                        <span style={{ color: "var(--text-muted)", display: "flex" }}><ArrowRight size={14} /></span>
 
                         {/* Target port pill */}
                         <span style={{

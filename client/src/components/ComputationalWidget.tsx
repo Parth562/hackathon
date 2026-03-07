@@ -5,7 +5,7 @@ import {
     LineChart, Line, BarChart, Bar, YAxis, XAxis, ResponsiveContainer,
     Tooltip, ReferenceLine,
 } from 'recharts';
-import { FlaskConical, TrendingUp, BarChart2, Sigma, Activity } from 'lucide-react';
+import { FlaskConical, TrendingUp, BarChart2, Sigma, Activity, Zap } from 'lucide-react';
 import { computeIndicator, type IndicatorId, type OHLCV } from '@/lib/indicatorEngine';
 
 // ── Registry ──────────────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ export default function ComputationalWidget({ data, onClose, onOutputChange }: P
     const isOsc = ['RSI', 'CCI', 'WILLR', 'STOCH'].includes(opId);
 
     const s: React.CSSProperties = {
-        background: 'rgba(0,0,0,0.25)', border: '1px solid var(--border-subtle)',
+        background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)',
         color: '#fff', padding: '4px 8px', borderRadius: '5px',
         fontSize: '0.78rem', fontFamily: 'var(--font-base)', width: '100%',
     };
@@ -157,7 +157,7 @@ export default function ComputationalWidget({ data, onClose, onOutputChange }: P
                     <Icon size={15} />
                     Computational Block
                     <span style={{ fontSize: '0.68rem', padding: '2px 6px', background: catColor + '22', border: `1px solid ${catColor}44`, borderRadius: '10px' }}>{op.category}</span>
-                    <span style={{ fontSize: '0.68rem', color: '#3fb95088', marginLeft: 2 }}>⚡ Local</span>
+                    <span style={{ fontSize: '0.68rem', color: '#3fb95088', marginLeft: 2, display: 'flex', alignItems: 'center', gap: '2px' }}><Zap size={10} /> Local</span>
                     {ticker && <span style={{ fontSize: '0.7rem', background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: '4px', color: 'var(--accent)' }}>{ticker}</span>}
                 </h3>
                 {onClose && <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '18px' }}>✕</button>}
@@ -212,7 +212,7 @@ export default function ComputationalWidget({ data, onClose, onOutputChange }: P
             </div>
 
             {/* Result area */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(0,0,0,0.15)', borderRadius: '8px', padding: '10px', minHeight: 0 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)', borderRadius: '8px', padding: '10px', minHeight: 0 }}>
                 {!ticker ? (
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textAlign: 'center', margin: 'auto' }}>
                         🔗 Connect a <strong style={{ color: '#3fb950' }}>Ticker</strong> input port

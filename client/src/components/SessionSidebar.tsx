@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { Plus, MessageSquare, Trash2, ChevronLeft, ChevronRight, TrendingUp } from "lucide-react";
+import { Plus, MessageSquare, Trash2, ChevronLeft, ChevronRight, TrendingUp, AlignHorizontalDistributeCenter } from "lucide-react";
 import { Button } from "./ui/Button";
 import { Divider, EmptyState } from "./ui/Divider";
 import { type SessionMeta } from "@/lib/schemas";
@@ -93,12 +93,12 @@ export default function SessionSidebar({
                     background: "var(--primary)",
                     display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
-                    <TrendingUp size={18} color="#fff" />
+                    <AlignHorizontalDistributeCenter size={18} color="#fff" />
                 </div>
                 {!collapsed && (
                     <div>
-                        <div style={{ fontWeight: 800, fontSize: "1.05rem", letterSpacing: "-0.03em", color: "var(--text-primary)" }}>KEN</div>
-                        <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Financial AI</div>
+                        <div style={{ fontWeight: 800, fontSize: "1.05rem", letterSpacing: "-0.03em", color: "var(--text-primary)" }}>Alex</div>
+                        <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Financial Asset Management</div>
                     </div>
                 )}
                 <button

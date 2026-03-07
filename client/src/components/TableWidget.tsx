@@ -3,6 +3,7 @@
 import React from "react";
 import remarkGfm from "remark-gfm";
 import ReactMarkdown from "react-markdown";
+import { BarChart2 } from "lucide-react";
 
 interface TableWidgetProps {
     data: {
@@ -12,9 +13,10 @@ interface TableWidgetProps {
     };
     onClose?: (e?: React.MouseEvent) => void;
     onOutputChange?: (updates: Record<string, any>) => void;
+    onOpenSettings?: () => void;
 }
 
-export default function TableWidget({ data, onClose, onOutputChange }: TableWidgetProps) {
+export default function TableWidget({ data, onClose, onOutputChange, onOpenSettings }: TableWidgetProps) {
     const title = data.title || "Data Table";
 
     const lastEmittedRef = React.useRef<string | null>(null);
@@ -49,7 +51,7 @@ export default function TableWidget({ data, onClose, onOutputChange }: TableWidg
                 }}
             >
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "1.1rem" }}>📊</span>
+                    <BarChart2 size={18} />
                     <span
                         style={{
                             fontWeight: 700,
@@ -60,30 +62,42 @@ export default function TableWidget({ data, onClose, onOutputChange }: TableWidg
                         {title}
                     </span>
                 </div>
-                {onClose && (
-                    <button
-                        onClick={onClose}
-                        style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--text-muted)",
-                            cursor: "pointer",
-                            fontSize: "16px",
-                            lineHeight: 1,
-                            padding: "2px 6px",
-                            borderRadius: "4px",
-                            transition: "color 0.15s",
-                        }}
-                        onMouseEnter={(e) =>
-                            ((e.currentTarget as HTMLElement).style.color = "var(--red)")
-                        }
-                        onMouseLeave={(e) =>
-                            ((e.currentTarget as HTMLElement).style.color = "var(--text-muted)")
-                        }
-                    >
-                        ✕
-                    </button>
-                )}
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    {onOpenSettings && (
+                        <button
+                            onClick={onOpenSettings}
+                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", display: "flex", alignItems: "center" }}
+                            onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--primary)")}
+                            onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.color = "var(--text-muted)")}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                        </button>
+                    )}
+                    {onClose && (
+                        <button
+                            onClick={onClose}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                color: "var(--text-muted)",
+                                cursor: "pointer",
+                                fontSize: "16px",
+                                lineHeight: 1,
+                                padding: "2px 6px",
+                                borderRadius: "4px",
+                                transition: "color 0.15s",
+                            }}
+                            onMouseEnter={(e) =>
+                                ((e.currentTarget as HTMLElement).style.color = "var(--red)")
+                            }
+                            onMouseLeave={(e) =>
+                                ((e.currentTarget as HTMLElement).style.color = "var(--text-muted)")
+                            }
+                        >
+                            ✕
+                        </button>
+                    )}
+                </div>
             </div>
 
             {/* Table content */}
