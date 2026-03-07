@@ -109,7 +109,7 @@ export default function WidgetSettingsDrawer({
             <div style={{
                 position: "fixed", right: 0, top: 0, bottom: 0,
                 width: "320px", zIndex: 4000,
-                background: "var(--bg-sidebar)",
+                background: "var(--bg-base)",
                 borderLeft: "1px solid var(--border-subtle)",
                 display: "flex", flexDirection: "column",
                 boxShadow: "-12px 0 40px rgba(0,0,0,0.4)",

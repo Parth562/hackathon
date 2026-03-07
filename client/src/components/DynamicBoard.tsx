@@ -1,5 +1,5 @@
 "use client";
-import { BarChart2 } from 'lucide-react';
+import { Activity, BarChart2, Sigma, TrendingUp, Variable } from 'lucide-react';
 
 import React, { useState, useCallback, useRef } from 'react';
 import ReactFlow, {
@@ -599,6 +599,7 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
                 maxZoom={4}
                 defaultEdgeOptions={{ type: 'smoothstep' }}
                 connectionMode={ConnectionMode.Loose}
+                connectionRadius={40}
                 deleteKeyCode={["Backspace", "Delete"]}
                 multiSelectionKeyCode={["Control", "Shift"]}
                 panOnScroll={true}
@@ -646,9 +647,9 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
                                 fontFamily: 'var(--font-base)', transition: 'all 0.15s ease',
                             }}
                             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#fff'; }}
-                            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
                         >
-                            🔗 Variable
+                            <Variable size={16} />
+                            Variable
                         </button>
 
                         {/* Palette dropdown */}
@@ -662,19 +663,22 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
                                 boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
                             }}>
                                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', padding: '4px 8px 8px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Data Blocks</div>
-                                {[{ label: '📈 Live Stock Price', fn: addLiveStockNode }].map(item => (
-                                    <button key={item.label} onClick={() => { item.fn(); setPaletteOpen(false); }} style={rowStyle}>{item.label}</button>
+                                {[{ label: 'Live Stock Price', icon: <TrendingUp size={14} style={{ marginRight: 6 }} />, fn: addLiveStockNode }].map(item => (
+                                    <button key={item.label} onClick={() => { item.fn(); setPaletteOpen(false); }} style={{ ...rowStyle, display: 'flex', alignItems: 'center' }}>
+                                        {item.icon}
+                                        {item.label}
+                                    </button>
                                 ))}
 
                                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', padding: '10px 8px 6px', textTransform: 'uppercase', letterSpacing: '0.06em', borderTop: '1px solid var(--border-subtle)', marginTop: '4px' }}>Computational Blocks</div>
                                 {[
-                                    { label: '📐 Computational (Trend/RSI/etc)', type: 'computational' },
-                                    { label: '🧮 Preprocessing (SMA/EMA)', type: 'preprocessing' },
+                                    { label: 'Computational (Trend/RSI/etc)', type: 'computational', icon: <Activity size={14} style={{ marginRight: 6 }} /> },
+                                    { label: 'Preprocessing (SMA/EMA)', type: 'preprocessing', icon: <Sigma size={14} style={{ marginRight: 6 }} /> },
                                 ].map(item => (
                                     <button key={item.type} onClick={() => { addComputationalNode(item.type); setPaletteOpen(false); }} style={rowStyle}
                                         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-surface)'; (e.currentTarget as HTMLElement).style.color = '#fff'; }}
                                         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; (e.currentTarget as HTMLElement).style.color = 'var(--text-secondary)'; }}
-                                    >{item.label}</button>
+                                    ><div style={{ display: 'flex', alignItems: 'center' }}>{item.icon}{item.label}</div></button>
                                 ))}
                             </div>
                         )}
@@ -683,17 +687,19 @@ function BoardInner({ widgets, onRemoveWidget, pendingActions = [], onActionsCon
             </ReactFlow>
 
             {/* Connection port-picker popup */}
-            {pendingConn && (
-                <ConnectionMenu
-                    x={pendingConn.x}
-                    y={pendingConn.y}
-                    sourceOutputs={pendingConn.sourceOutputs}
-                    targetInputs={pendingConn.targetInputs}
-                    onConfirm={handleConnectionConfirm}
-                    onCancel={() => setPendingConn(null)}
-                />
-            )}
-        </div>
+            {
+                pendingConn && (
+                    <ConnectionMenu
+                        x={pendingConn.x}
+                        y={pendingConn.y}
+                        sourceOutputs={pendingConn.sourceOutputs}
+                        targetInputs={pendingConn.targetInputs}
+                        onConfirm={handleConnectionConfirm}
+                        onCancel={() => setPendingConn(null)}
+                    />
+                )
+            }
+        </div >
     );
 }
 

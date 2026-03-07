@@ -56,9 +56,9 @@ function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
                 position={Position.Left}
                 id="var-target"
                 style={{
-                    width: "10px", height: "10px", borderRadius: "50%",
+                    width: "16px", height: "16px", borderRadius: "50%",
                     background: synced ? "var(--accent)" : "var(--border-strong)",
-                    border: "2px solid var(--bg-base)", left: "-5px",
+                    border: "3px solid var(--bg-base)", left: "-8px",
                 }}
             />
 
@@ -141,9 +141,9 @@ function VariableNode({ data, selected, id }: NodeProps<VariableNodeData>) {
                 position={Position.Right}
                 id="var-source"
                 style={{
-                    width: "10px", height: "10px", borderRadius: "50%",
+                    width: "16px", height: "16px", borderRadius: "50%",
                     background: "var(--primary)",
-                    border: "2px solid var(--bg-base)", right: "-5px",
+                    border: "3px solid var(--bg-base)", right: "-8px",
                 }}
             />
         </div>

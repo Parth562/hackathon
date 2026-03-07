@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, StopCircle, Layers, Library, MessageSquare, Search, X, ChevronDown, ChevronUp, Check, XCircle, AlertTriangle, Wrench, Brain, MessageCircle, FileText } from "lucide-react";
+import { Send, Paperclip, StopCircle, Layers, Library, MessageSquare, Search, X, ChevronDown, ChevronUp, Check, XCircle, AlertTriangle, Wrench, Brain, MessageCircle, FileText, Compass, BarChart2, Edit3, Map as MapIcon, TrendingUp, Sigma, Microscope, Loader2 } from "lucide-react";
 import { Button, Spinner } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Badge, StatusDot } from "./ui/Badge";
@@ -12,6 +12,18 @@ import { Select } from "./ui/Select";
 import { Divider, EmptyState } from "./ui/Divider";
 import { fetchModels, fetchDocuments, uploadDocument, deleteDocument, searchDocuments, streamChat } from "@/lib/api";
 import { StreamEventSchema, type Model } from "@/lib/schemas";
+
+const STATUS_ICONS: Record<string, React.ElementType> = {
+    "Understanding your request...": Compass,
+    "Fetching data...": BarChart2,
+    "Updating portfolio...": Edit3,
+    "Planner: Formulating research plan...": MapIcon,
+    "Research Agent: Scouring the web and documents...": Search,
+    "Data Agent: Retrieving hard financial figures...": TrendingUp,
+    "Analysis Agent: Running quantitative models...": Sigma,
+    "Critic Agent: Verifying reasoning and assessing risks...": Microscope,
+    "Report Agent: Synthesizing final insight...": FileText
+};
 
 // ── Types ─────────────────────────────────────────────
 interface Message {
@@ -731,7 +743,11 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                         }}>
                             {/* Stage label row */}
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <StatusDot color="var(--primary)" pulse />
+                                {STATUS_ICONS[statusMsg] ? (
+                                    React.createElement(STATUS_ICONS[statusMsg], { size: 14, color: "var(--primary)" })
+                                ) : (
+                                    <StatusDot color="var(--primary)" pulse />
+                                )}
                                 <span style={{
                                     fontSize: "0.75rem",
                                     fontWeight: 600,

@@ -125,9 +125,9 @@ const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose, onOutp
 
   const containerStyle: React.CSSProperties = {
     display: 'flex', flexDirection: 'column', padding: '20px', height: '100%', width: '100%',
-    boxSizing: 'border-box', background: 'rgba(15, 20, 30, 0.7)', backdropFilter: 'blur(16px)',
-    WebkitBackdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.08)',
-    borderRadius: '12px', color: 'white', position: 'relative', overflow: 'hidden'
+    boxSizing: 'border-box', background: 'var(--bg-surface)', backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)', border: '1px solid var(--border-subtle)',
+    borderRadius: '12px', color: 'var(--foreground)', position: 'relative', overflow: 'hidden'
   };
 
   const headerStyle: React.CSSProperties = {
@@ -135,11 +135,11 @@ const LiveStockWidget: React.FC<LiveStockWidgetProps> = ({ data, onClose, onOutp
   };
 
   const titleStyle: React.CSSProperties = {
-    margin: 0, fontSize: '1.2rem', fontWeight: 600, color: '#e0e6ed', display: 'flex', alignItems: 'center', gap: '8px'
+    margin: 0, fontSize: '1.2rem', fontWeight: 600, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '8px'
   };
 
   const pulseStyle: React.CSSProperties = {
-    width: '8px', height: '8px', backgroundColor: '#00ff66', borderRadius: '50%', boxShadow: '0 0 8px #00ff66',
+    width: '8px', height: '8px', backgroundColor: 'var(--primary)', borderRadius: '50%', boxShadow: '0 0 8px var(--primary)',
     animation: 'pulse 1.5s infinite' // Note: Keyframes animation won't work perfectly without styled-components/css files, but it's acceptable fallback
   };
 

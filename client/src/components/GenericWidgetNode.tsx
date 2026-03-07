@@ -38,13 +38,13 @@ function PortHandle({ port, side }: { port: PortDef; side: "input" | "output" })
             position={position}
             title={`${port.label} (${port.type}): ${port.description}`}
             style={{
-                width: "12px",
-                height: "12px",
+                width: "16px",
+                height: "16px",
                 borderRadius: "50%",
                 background: color,
-                border: "2.5px solid var(--bg-sidebar)",
+                border: "3px solid var(--bg-base)",
                 position: "absolute",
-                [side === "input" ? "left" : "right"]: "-6px",
+                [side === "input" ? "left" : "right"]: "-8px",
             }}
         />
     );
@@ -120,7 +120,7 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
     } else if (widgetType === 'custom') {
         content = <CustomWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'portfolio_analysis') {
-        content = <PortfolioWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
+        content = <PortfolioWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
     } else if (widgetType === 'kpi_dashboard') {
         content = <KpiDashboardWidget data={widgetData} onClose={handleClose} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'peer_benchmark') {
@@ -140,7 +140,7 @@ const GenericWidgetNode = ({ data, selected, id }: { data: any; selected: boolea
     } else if (widgetType === 'preprocessing') {
         content = <PreprocessingWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else if (widgetType === 'computational') {
-        content = <ComputationalWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
+        content = <ComputationalWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} />;
     } else if (widgetType === 'math') {
         content = <MathWidget data={widgetData} onClose={handleClose} onOutputChange={handleOutputChange} onOpenSettings={handleOpenSettings} />;
     } else {

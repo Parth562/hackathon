@@ -358,15 +358,15 @@ async def chat_endpoint(request: ChatRequest):
                 elif kind == "on_chain_start":
                     name = event["name"]
                     status_map = {
-                        "intent": "🧭 Understanding your request...",
-                        "read_data": "📊 Fetching data...",
-                        "write_data": "✏️ Updating portfolio...",
-                        "planner": "🗺️ Planner: Formulating research plan...",
-                        "research": "🔍 Research Agent: Scouring the web and documents...",
-                        "data": "📈 Data Agent: Retrieving hard financial figures...",
-                        "analysis": "🧮 Analysis Agent: Running quantitative models...",
-                        "critic": "🔬 Critic Agent: Verifying reasoning and assessing risks...",
-                        "report": "📝 Report Agent: Synthesizing final insight..."
+                        "intent": "Understanding your request...",
+                        "read_data": "Fetching data...",
+                        "write_data": "Updating portfolio...",
+                        "planner": "Planner: Formulating research plan...",
+                        "research": "Research Agent: Scouring the web and documents...",
+                        "data": "Data Agent: Retrieving hard financial figures...",
+                        "analysis": "Analysis Agent: Running quantitative models...",
+                        "critic": "Critic Agent: Verifying reasoning and assessing risks...",
+                        "report": "Report Agent: Synthesizing final insight..."
                     }
                     if name in status_map:
                         yield json.dumps({"type": "status", "content": status_map[name]}) + "\n"
