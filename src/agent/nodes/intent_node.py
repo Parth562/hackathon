@@ -1,16 +1,86 @@
 from langchain_core.messages import SystemMessage
 from src.agent.state import AgentState
 
+def _fetch_document_context(query: str) -> str:
+    """Auto-retrieve relevant context from uploaded documents via Qdrant."""
+    try:
+        from src.tools.document_tools import get_document_store
+        store = get_document_store()
+        results = store.retrieve_relevant_memories(query, limit=5)
+        if not results:
+            return ""
+        
+        context_parts = []
+        for idx, hit in enumerate(results):
+            source = hit.get("metadata", {}).get("source", "Unknown")
+            score = hit.get("score", 0)
+            # Only include results with reasonable relevance (cosine > 0.25)
+            if score < 0.25:
+                continue
+            context_parts.append(
+                f"--- Document Excerpt {idx+1} (Source: {source}, Score: {score:.2f}) ---\n{hit['text']}"
+            )
+        
+        if not context_parts:
+            return ""
+        
+        n = len(context_parts)
+        print(f"[RAG] Retrieved {n} document excerpts for query: {query[:80]}...")
+        return "CONTEXT FROM UPLOADED DOCUMENTS:\n\n" + "\n\n".join(context_parts)
+    except Exception as e:
+        print(f"[RAG] Auto-retrieval failed: {e}")
+        return ""
+
+
+def _fetch_user_memories(query: str) -> str:
+    """Auto-retrieve relevant personal facts/preferences from long-term memory."""
+    try:
+        from src.agent.graph import get_memory_manager
+        memory = get_memory_manager()
+        results = memory.retrieve_relevant_memories(query, limit=5)
+        if not results:
+            return ""
+        
+        # Filter to only user_fact type entries with decent scores
+        facts = []
+        for hit in results:
+            meta = hit.get("metadata", {})
+            score = hit.get("score", 0)
+            if meta.get("type") != "user_fact":
+                continue
+            if score < 0.20:
+                continue
+            facts.append(hit["text"])
+        
+        if not facts:
+            return ""
+        
+        print(f"[Memory] Retrieved {len(facts)} user memories for query: {query[:80]}...")
+        return "USER'S PERSONAL CONTEXT (remembered from past conversations):\n" + "\n".join(
+            f"- {fact}" for fact in facts
+        )
+    except Exception as e:
+        print(f"[Memory] Auto-retrieval failed: {e}")
+        return ""
+
+
 async def intent_node(state: AgentState) -> dict:
     """
     Evaluates the user query to classify the intent into one of 4 tiers:
     READ_DATA, WRITE_DATA, ANALYSIS, RESEARCH.
+    Also auto-retrieves RAG context and user memories for every query.
     """
     messages = state.get("messages", [])
     if not messages:
-        return {"intent": "RESEARCH"}
+        return {"intent": "RESEARCH", "document_context": "", "memory_context": ""}
 
     user_query = messages[-1].content.lower()
+
+    # ── 0. Auto-retrieve RAG context + user memories in parallel ─────────────
+    import asyncio
+    doc_future = asyncio.to_thread(_fetch_document_context, user_query)
+    mem_future = asyncio.to_thread(_fetch_user_memories, user_query)
+    document_context, memory_context = await asyncio.gather(doc_future, mem_future)
 
     # ── 1. Deterministic / Keyword-based Rules ─────────────────────────────────
     # These must fire BEFORE the LLM to prevent expensive misclassifications.
@@ -51,7 +121,7 @@ async def intent_node(state: AgentState) -> dict:
 
     # Route immediately based on deterministic rules
     if is_portfolio_mod:
-        return {"intent": "WRITE_DATA"}
+        return {"intent": "WRITE_DATA", "document_context": document_context, "memory_context": memory_context}
 
     if is_canvas_request or is_price_request:
         # Unless it explicitly asks for deep analysis, route to quick READ
@@ -59,11 +129,11 @@ async def intent_node(state: AgentState) -> dict:
             "analyze", "predict", "forecast", "dcf", "valuation",
             "compare", "benchmark", "risk score", "scenario", "technical indicators",
         ]):
-            return {"intent": "READ_DATA"}
+            return {"intent": "READ_DATA", "document_context": document_context, "memory_context": memory_context}
 
     # "show me / what is my portfolio" → READ
     if "portfolio" in user_query and any(kw in user_query for kw in ["show", "what", "my", "view"]):
-        return {"intent": "READ_DATA"}
+        return {"intent": "READ_DATA", "document_context": document_context, "memory_context": memory_context}
 
     # ── 2. LLM Classification for complex / ambiguous queries ──────────────────
     from src.agent.graph import get_llm
@@ -100,14 +170,14 @@ Examples:
         content = response.content.strip().upper()
 
         if "WRITE_DATA" in content:
-            return {"intent": "WRITE_DATA"}
+            return {"intent": "WRITE_DATA", "document_context": document_context, "memory_context": memory_context}
         elif "READ_DATA" in content:
-            return {"intent": "READ_DATA"}
+            return {"intent": "READ_DATA", "document_context": document_context, "memory_context": memory_context}
         elif "ANALYSIS" in content:
-            return {"intent": "ANALYSIS"}
+            return {"intent": "ANALYSIS", "document_context": document_context, "memory_context": memory_context}
         else:
-            return {"intent": "RESEARCH"}
+            return {"intent": "RESEARCH", "document_context": document_context, "memory_context": memory_context}
 
     except Exception as e:
         print(f"[Intent Classifier] Failed: {e}")
-        return {"intent": "RESEARCH"}
+        return {"intent": "RESEARCH", "document_context": document_context, "memory_context": memory_context}

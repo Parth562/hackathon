@@ -9,7 +9,7 @@ const roboto = Roboto({
 });
 
 export const metadata: Metadata = {
-  title: "KEN | Executive Dashboard",
+  title: "Alex | Executive Dashboard",
   description: "Dynamic AI Financial Management Board",
 };
 

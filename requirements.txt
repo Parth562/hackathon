@@ -26,3 +26,4 @@ matplotlib
 python-multipart
 growwapi
 pyotp
+qdrant-client

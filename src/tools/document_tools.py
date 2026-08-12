@@ -6,7 +6,7 @@ _document_store_instance = None
 def get_document_store():
     global _document_store_instance
     if _document_store_instance is None:
-        from src.memory.vector_store import DocumentStore
+        from src.memory.qdrant_store import DocumentStore
         _document_store_instance = DocumentStore()
     return _document_store_instance
 

@@ -172,7 +172,18 @@ def add_canvas_widget(session_id: str, widget_type: str, arguments: dict = None)
     Adds a new widget or variable node to the canvas.
     widget_type can be 'variableNode' or 'customWidget'.
     If 'customWidget', arguments should contain 'widget_type' matching one of the supported 
-    widgets (e.g., 'live_stock', 'preprocessing', 'computational', 'chart').
+    widgets (e.g., 'live_stock', 'preprocessing', 'computational', 'chart', 'network_graph').
+    
+    CRITICAL INSTRUCTION FOR DATA FETCHING:
+    Do NOT fetch massive historical pricing or indicator arrays to pass into `arguments`! 
+    The browser widgets will fetch their own data directly. You must ONLY pass the configuration 
+    parameters needed (e.g. `{"widget_type": "preprocessing", "ticker": "AAPL", "function": "SMA"}`).
+    
+    CRITICAL: PYTHON CODE EXECUTION
+    NEVER use this tool to spawn 'code_block', 'sandbox', or Python scripts manually.
+    If you need to write and display Python code, you MUST use the `execute_python_code` tool. 
+    It will automatically create the UI widget for you.
+    
     CRITICAL: Do not invent widget types. Use `list_available_widgets` to find supported ones.
     If 'variableNode', arguments should contain 'variableName' and 'variableValue'.
     """
@@ -308,6 +319,94 @@ def set_widget_ticker(session_id: str, node_id: str, ticker: str) -> str:
     })
     return json.dumps({"status": "queued", "action": "set_ticker", "nodeId": node_id, "ticker": ticker})
 
+
+# ── Tool: buy shares widget ──────────────────────────────────────────────────
+
+@tool
+def buy_shares_on_canvas(session_id: str, ticker: str, quantity: float, price: float = 0.0) -> str:
+    """
+    Spawns a Buy Shares widget on the canvas pre-filled with the given ticker,
+    quantity, and optional cost basis price. The user can then confirm the
+    purchase visually. Use this when the user asks to add a 'buy' widget.
+    """
+    import uuid
+    new_id = f"customWidget-{uuid.uuid4().hex[:8]}"
+    _push_action(session_id, {
+        "type": "add_node",
+        "node": {
+            "id": new_id,
+            "type": "customWidget",
+            "position": {"x": 200, "y": 200},
+            "data": {"widgetData": {
+                "widget_type": "buy_shares",
+                "ticker": ticker.upper(),
+                "quantity": quantity,
+                "price": price,
+            }}
+        }
+    })
+    return json.dumps({"status": "queued", "action": "add_buy_shares", "nodeId": new_id, "ticker": ticker.upper(), "quantity": quantity})
+
+
+# ── Tool: sell shares widget ─────────────────────────────────────────────────
+
+@tool
+def sell_shares_on_canvas(session_id: str, ticker: str, quantity: float, price: float = 0.0) -> str:
+    """
+    Spawns a Sell Shares widget on the canvas pre-filled with the given ticker,
+    quantity, and optional sale price. The user can then confirm the sale
+    visually. Use this when the user asks to add a 'sell' widget.
+    """
+    import uuid
+    new_id = f"customWidget-{uuid.uuid4().hex[:8]}"
+    _push_action(session_id, {
+        "type": "add_node",
+        "node": {
+            "id": new_id,
+            "type": "customWidget",
+            "position": {"x": 200, "y": 350},
+            "data": {"widgetData": {
+                "widget_type": "sell_shares",
+                "ticker": ticker.upper(),
+                "quantity": quantity,
+                "price": price,
+            }}
+        }
+    })
+    return json.dumps({"status": "queued", "action": "add_sell_shares", "nodeId": new_id, "ticker": ticker.upper(), "quantity": quantity})
+
+
+# ── Tool: conditional / if-else node ─────────────────────────────────────────
+
+@tool
+def add_conditional_node(session_id: str, comparator: str = ">") -> str:
+    """
+    Spawns an If/Else conditional logic node on the canvas.
+    The comparator can be '>', '<', '>=', '<=', '==', or '!='.
+    This node takes two inputs (A and B), evaluates the condition A {comparator} B,
+    and outputs whether the result is 'true' or 'false', plus pass-through values.
+    Use this when the user wants to add conditional/branching logic to their canvas.
+    """
+    valid_ops = ['>', '<', '>=', '<=', '==', '!=']
+    if comparator not in valid_ops:
+        return json.dumps({"error": f"Invalid comparator '{comparator}'. Use one of: {valid_ops}"})
+
+    import uuid
+    new_id = f"customWidget-{uuid.uuid4().hex[:8]}"
+    _push_action(session_id, {
+        "type": "add_node",
+        "node": {
+            "id": new_id,
+            "type": "customWidget",
+            "position": {"x": 300, "y": 200},
+            "data": {"widgetData": {
+                "widget_type": "conditional",
+                "comparator": comparator,
+            }}
+        }
+    })
+    return json.dumps({"status": "queued", "action": "add_conditional", "nodeId": new_id, "comparator": comparator})
+
 @tool
 def list_available_widgets() -> str:
     """
@@ -316,6 +415,7 @@ def list_available_widgets() -> str:
     and exactly these input/output IDs when connecting widgets.
     """
     schema = [
+        {"widget_type": "network_graph", "inputs": ["in-data"], "outputs": ["out-selection"]},
         {"widget_type": "live_stock", "inputs": ["in-ticker"], "outputs": ["out-ticker", "out-price", "out-change"]},
         {"widget_type": "preprocessing", "inputs": ["in-ticker", "in-time-period"], "outputs": ["out-result", "out-series", "out-ticker"]},
         {"widget_type": "computational", "inputs": ["in-ticker", "in-time-period"], "outputs": ["out-result", "out-series", "out-ticker"]},
@@ -335,5 +435,8 @@ def list_available_widgets() -> str:
         {"widget_type": "math", "inputs": ["in-a", "in-b", "in-c", "in-d"], "outputs": ["out-result", "out-series"]},
         {"widget_type": "custom", "inputs": ["in-any"], "outputs": ["out-any"]},
         {"widget_type": "variable", "inputs": ["var-target"], "outputs": ["var-source"]},
+        {"widget_type": "buy_shares", "inputs": ["in-ticker", "in-quantity", "in-price"], "outputs": ["out-status", "out-ticker"]},
+        {"widget_type": "sell_shares", "inputs": ["in-ticker", "in-quantity", "in-price"], "outputs": ["out-status", "out-ticker"]},
+        {"widget_type": "conditional", "inputs": ["in-a", "in-b"], "outputs": ["out-result", "out-true-value", "out-false-value"]},
     ]
     return json.dumps(schema, indent=2)

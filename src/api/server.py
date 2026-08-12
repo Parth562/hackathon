@@ -81,7 +81,7 @@ import tempfile
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
-    """Uploads a company document, extracts text, chunks it, and stores in the FAISS document index."""
+    """Uploads a company document, extracts text, chunks it, and stores in the Qdrant document index."""
     try:
         # Create a temporary file to save the uploaded content
         suffix = os.path.splitext(file.filename)[1]
@@ -130,7 +130,7 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.get("/api/documents")
 async def get_documents():
-    """Returns a list of all uniquely uploaded document filenames from the FAISS index."""
+    """Returns a list of all uniquely uploaded document filenames from the Qdrant index."""
     try:
         from src.tools.document_tools import get_document_store
         sources = await asyncio.to_thread(get_document_store().get_all_document_sources)
@@ -263,6 +263,104 @@ async def search_documents(request: SimilaritySearchRequest):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+# ── Portfolio Optimization Endpoints ──────────────────────────────────────────
+
+@app.get("/api/portfolio")
+async def get_portfolio():
+    """Returns the user's entire portfolio."""
+    try:
+        portfolio = await asyncio.to_thread(_store.get_full_portfolio)
+        return {"portfolio": portfolio}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/portfolio/suggestions")
+async def get_portfolio_suggestions():
+    """Returns pending portfolio optimization suggestions."""
+    try:
+        suggestions = await asyncio.to_thread(_store.get_pending_suggestions)
+        return {"suggestions": suggestions}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/portfolio/optimize")
+async def trigger_portfolio_optimization():
+    """Manually triggers the background optimization task."""
+    try:
+        from src.agent.portfolio_optimizer import optimize_portfolio_background_task
+        asyncio.create_task(optimize_portfolio_background_task())
+        return {"message": "Portfolio optimization task triggered in the background."}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/portfolio/suggestions/{suggestion_id}/approve")
+async def approve_suggestion(suggestion_id: str):
+    """Approves a suggestion and updates the portfolio."""
+    try:
+        suggestion = await asyncio.to_thread(_store.get_suggestion, suggestion_id)
+        if not suggestion:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        
+        # Apply the suggestion to the portfolio
+        ticker = suggestion['ticker']
+        action = suggestion['action']
+        shares_to_trade = suggestion['shares']
+        
+        # Get current shares
+        portfolio = await asyncio.to_thread(_store.get_full_portfolio)
+        current_item = next((item for item in portfolio if item['ticker'] == ticker), None)
+        current_shares = current_item['shares'] if current_item else 0.0
+        
+        new_shares = current_shares
+        if action == 'buy':
+            new_shares += shares_to_trade
+        elif action == 'sell':
+            new_shares = max(0, current_shares - shares_to_trade)
+            
+        await asyncio.to_thread(_store.update_portfolio_item, ticker, new_shares)
+        await asyncio.to_thread(_store.update_suggestion_status, suggestion_id, 'approved')
+        
+        return {"message": f"Successfully approved {action} for {ticker}."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/portfolio/suggestions/{suggestion_id}/decline")
+async def decline_suggestion(suggestion_id: str):
+    """Declines a suggestion."""
+    try:
+        await asyncio.to_thread(_store.update_suggestion_status, suggestion_id, 'declined')
+        return {"message": "Suggestion declined."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Canvas State Endpoints ────────────────────────────────────────────────────
+
+class PortfolioUpdateRequest(BaseModel):
+    action: str    # 'add', 'remove', or 'set'
+    ticker: str
+    shares: float
+    cost_basis: float = 0.0
+
+@app.post("/api/portfolio/update")
+async def update_portfolio_endpoint(request: PortfolioUpdateRequest):
+    """Direct portfolio update endpoint used by the Buy/Sell canvas widgets."""
+    try:
+        from src.tools.portfolio_tools import update_portfolio
+        result_json = await asyncio.to_thread(
+            update_portfolio.invoke,
+            {"action": request.action, "ticker": request.ticker, "shares": request.shares, "cost_basis": request.cost_basis}
+        )
+        return json.loads(result_json)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ── Canvas State Endpoints ────────────────────────────────────────────────────
 
@@ -422,12 +520,23 @@ async def chat_endpoint(request: ChatRequest):
             
             mode = current_state.get('research_mode', 'UNKNOWN')
             
+            # Clean up final text to prevent any rogue JSON/routing tags from leaking to the UI
+            import re
+            cleaned_response = re.sub(r'(RESEARCH|DATA|ANALYSIS|PLANNER)\s*\{[\s\S]*?\}', '', response_text).strip()
+            
             yield json.dumps({
                 "type": "result", 
-                "response": response_text,
+                "response": cleaned_response,
                 "session_id": session_id,
                 "mode": mode
             }) + "\n"
+            
+            # Fire-and-forget: extract and store personal facts from the user's message
+            try:
+                from src.agent.nodes.memory_node import extract_and_store_facts
+                asyncio.create_task(extract_and_store_facts(request.message))
+            except Exception as e:
+                print(f"[Memory] Failed to schedule fact extraction: {e}")
 
         except Exception as e:
             error_msg = str(e)
@@ -469,6 +578,20 @@ async def get_session(session_id: str):
 
 class BoardStateRequest(BaseModel):
     board_state: Any  # Can be list (legacy) or {nodes, edges} object
+
+@app.post("/api/sessions/init")
+async def init_session():
+    """Create a new empty session (no message required) and return its ID."""
+    session_id = str(uuid.uuid4())
+    await asyncio.to_thread(_store.upsert_session, session_id, "Main Workspace")
+    return {"session_id": session_id}
+
+@app.get("/api/canvas/{session_id}/snapshot")
+async def get_canvas_snapshot(session_id: str):
+    """Returns the current in-memory canvas node/edge state for context."""
+    from src.tools.canvas_tools import get_session_canvas
+    state = get_session_canvas(session_id)
+    return {"nodes": state.get("nodes", []), "edges": state.get("edges", [])}
 
 @app.post("/api/sessions/{session_id}/board")
 async def save_board(session_id: str, request: BoardStateRequest):
@@ -515,6 +638,22 @@ async def check_alerts(request: AlertRequest):
                 alerts.append(f"UNKNOWN: FCF data missing for {request.ticker}")
                 
         return {"ticker": request.ticker, "alerts": alerts}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+class SandboxExecuteRequest(BaseModel):
+    code: str
+    inputs: dict = None
+
+@app.post("/api/sandbox/execute")
+async def sandbox_execute(request: SandboxExecuteRequest):
+    """Executes python code with inputs and returns the result."""
+    try:
+        from src.tools.sandbox_tools import run_python_script
+        res = await asyncio.to_thread(run_python_script, request.code, request.inputs)
+        return res
     except Exception as e:
         import traceback
         traceback.print_exc()

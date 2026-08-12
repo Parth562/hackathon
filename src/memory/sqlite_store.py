@@ -55,6 +55,19 @@ class StructuredStore:
         )
         ''')
 
+        # Table for Portfolio Optimization Suggestions
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS portfolio_suggestions (
+            id TEXT PRIMARY KEY,
+            ticker TEXT,
+            action TEXT,
+            shares REAL,
+            reasoning TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+
         # Table for persisting chat sessions + board state
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
@@ -71,6 +84,14 @@ class StructuredStore:
             cursor.execute("ALTER TABLE sessions ADD COLUMN messages_json TEXT DEFAULT '[]'")
         except Exception:
             pass  # column already exists
+
+        # Migrate: add detailed_analysis and citations columns if missing
+        try:
+            cursor.execute("ALTER TABLE portfolio_suggestions ADD COLUMN detailed_analysis TEXT")
+        except Exception: pass
+        try:
+            cursor.execute("ALTER TABLE portfolio_suggestions ADD COLUMN citations TEXT")
+        except Exception: pass
 
         conn.commit()
         conn.close()
@@ -153,6 +174,50 @@ class StructuredStore:
         conn.close()
         
         return [{"ticker": row["ticker"], "shares": row["shares"], "cost_basis": row["cost_basis"]} for row in rows]
+
+    # ── Portfolio Suggestions ─────────────────────────────────────────────────
+
+    def add_portfolio_suggestion(self, suggestion_id: str, ticker: str, action: str, shares: float, reasoning: str, detailed_analysis: str = "", citations: str = "[]") -> bool:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO portfolio_suggestions (id, ticker, action, shares, reasoning, status, detailed_analysis, citations) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
+            (suggestion_id, ticker, action, shares, reasoning, detailed_analysis, citations)
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def get_pending_suggestions(self) -> List[Dict[str, Any]]:
+        conn = self._get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT * FROM portfolio_suggestions WHERE status = 'pending' ORDER BY created_at DESC")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [dict(row) for row in rows]
+
+    def update_suggestion_status(self, suggestion_id: str, status: str) -> bool:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE portfolio_suggestions SET status = ? WHERE id = ?",
+            (status, suggestion_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def get_suggestion(self, suggestion_id: str) -> Dict[str, Any]:
+        conn = self._get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM portfolio_suggestions WHERE id = ?", (suggestion_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
 
     # ── Session management ────────────────────────────────────────────────────
 

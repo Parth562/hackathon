@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Send, Paperclip, StopCircle, Layers, Library, MessageSquare, Search, X, ChevronDown, ChevronUp, Check, XCircle, AlertTriangle, Wrench, Brain, MessageCircle, FileText, Compass, BarChart2, Edit3, Map as MapIcon, TrendingUp, Sigma, Microscope, Loader2 } from "lucide-react";
+import { Send, Paperclip, StopCircle, Layers, Library, MessageSquare, Search, X, ChevronDown, ChevronUp, Check, XCircle, AlertTriangle, Wrench, Brain, MessageCircle, FileText, Compass, BarChart2, Edit3, Map as MapIcon, TrendingUp, Sigma, Microscope, Loader2, Sparkles, Zap } from "lucide-react";
 import { Button, Spinner } from "./ui/Button";
 import { Input } from "./ui/Input";
 import { Badge, StatusDot } from "./ui/Badge";
@@ -44,12 +44,11 @@ interface Props {
 const PREF_MODEL_KEY = "ALEX_model_pref";
 const PREF_MODE_KEY = "ALEX_mode_pref";
 
+
 // ── Components ────────────────────────────────────────
 
 const ThinkingLog = ({ events }: { events: any[] }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
-
-    // Group reasoning tokens together so they don't spawn thousands of individual divs
+    // Group reasoning tokens together
     const groupedEvents = React.useMemo(() => {
         const groups: any[] = [];
         for (const ev of events) {
@@ -69,77 +68,91 @@ const ThinkingLog = ({ events }: { events: any[] }) => {
 
     if (!events || events.length === 0) return null;
 
+    // Custom markdown renderers for the inner log
+    const markdownComponents = {
+        p: ({ node, ...props }: any) => <p style={{ margin: "4px 0" }} {...props} />,
+        a: ({ node, ...props }: any) => <a style={{ color: "var(--accent)", textDecoration: "none" }} target="_blank" {...props} />,
+        strong: ({ node, ...props }: any) => <strong style={{ color: "var(--text-primary)" }} {...props} />,
+        ul: ({ node, ...props }: any) => <ul style={{ margin: "4px 0", paddingLeft: "20px" }} {...props} />,
+        li: ({ node, ...props }: any) => <li style={{ marginBottom: "2px" }} {...props} />,
+        table: ({ node, ...props }: any) => (
+            <div style={{ overflowX: "auto", margin: "8px 0" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }} {...props} />
+            </div>
+        ),
+        th: ({ node, ...props }: any) => <th style={{ padding: "4px 8px", borderBottom: "1px solid var(--border-subtle)", textAlign: "left", color: "var(--text-secondary)" }} {...props} />,
+        td: ({ node, ...props }: any) => <td style={{ padding: "4px 8px", borderBottom: "1px solid rgba(255,255,255,0.05)" }} {...props} />,
+        code: ({ node, inline, ...props }: any) => (
+            <code style={{
+                background: "rgba(0,0,0,0.3)",
+                padding: inline ? "2px 4px" : "6px",
+                borderRadius: "4px",
+                fontSize: "0.7rem",
+                display: inline ? "inline" : "block",
+                overflowX: inline ? "visible" : "auto",
+                whiteSpace: inline ? "normal" : "pre"
+            }} {...props} />
+        )
+    };
+
     return (
         <div style={{
-            marginTop: "10px",
-            border: "1px solid var(--border-subtle)",
-            borderRadius: "var(--radius-md)",
-            overflow: "hidden",
-            background: "rgba(0,0,0,0.2)",
-            backdropFilter: "blur(4px)",
+            marginTop: "16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+            paddingTop: "12px",
+            borderTop: "1px dashed var(--border-subtle)",
         }}>
-            <button
-                type="button"
-                onClick={() => setIsExpanded(!isExpanded)}
-                style={{
-                    width: "100%", padding: "8px 12px", display: "flex", alignItems: "center", justifyContent: "space-between",
-                    background: "transparent", border: "none", color: "var(--text-secondary)", fontSize: "0.7rem",
-                    fontWeight: 600, cursor: "pointer",
-                }}
-            >
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Search size={12} style={{ opacity: 0.7 }} />
-                    INTERNAL LOG ({events.length} STEPS)
-                </div>
-                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </button>
-            {isExpanded && (
-                <div style={{
-                    padding: "10px 12px", borderTop: "1px solid var(--border-subtle)",
-                    maxHeight: "350px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "10px",
-                    background: "rgba(0,0,0,0.1)",
-                }}>
-                    {groupedEvents.map((ev, i) => (
-                        <div key={i} style={{ fontSize: "0.75rem", lineHeight: 1.5 }}>
-                            {ev.kind === "tool_start" && (
-                                <div style={{ color: "var(--primary)", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
-                                    <Wrench size={14} />
-                                    Calling: <code style={{ color: "var(--text-primary)", background: "rgba(255,255,255,0.05)", padding: "2px 4px", borderRadius: "3px" }}>{ev.tool}</code>
-                                    <pre style={{
-                                        fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "6px",
-                                        padding: "8px", background: "rgba(0,0,0,0.2)", borderRadius: "4px",
-                                        overflowX: "auto", border: "1px solid rgba(255,255,255,0.03)"
-                                    }}>
-                                        {JSON.stringify(ev.input, null, 2)}
-                                    </pre>
-                                </div>
-                            )}
-                            {ev.kind === "tool_end" && (
-                                <div style={{ color: "#4ade80", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }}>
-                                    <Check size={14} color="#4ade80" />
-                                    Finished: <code style={{ color: "var(--text-primary)", background: "rgba(255,255,255,0.05)", padding: "2px 4px", borderRadius: "3px" }}>{ev.tool}</code>
-                                    <pre style={{
-                                        fontSize: "0.65rem", color: "var(--text-muted)", marginTop: "6px",
-                                        padding: "8px", background: "rgba(0,0,0,0.2)", borderRadius: "4px",
-                                        maxHeight: "150px", overflowY: "auto", whiteSpace: "pre-wrap",
-                                        border: "1px solid rgba(255,255,255,0.03)"
-                                    }}>
-                                        {ev.output}
-                                    </pre>
-                                </div>
-                            )}
-                            {ev.kind === "reasoning" && (
-                                <span style={{
-                                    display: 'inline-block',
-                                    whiteSpace: 'pre-wrap',
-                                    wordBreak: 'break-word',
-                                    color: 'var(--text-secondary)'
-                                }}>{ev.content}</span>
-                            )}
+            {groupedEvents.map((ev, i) => (
+                <div key={i} style={{ fontSize: "0.85rem", lineHeight: 1.5, color: "var(--text-muted)" }}>
+                    {ev.kind === "tool_start" && (
+                        <div style={{
+                            borderLeft: "2px solid var(--border-subtle)",
+                            paddingLeft: "12px",
+                        }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px", color: "var(--text-secondary)" }}>
+                                <Wrench size={12} />
+                                <span style={{ fontSize: "0.75rem" }}>Using <strong>{ev.tool}</strong></span>
+                            </div>
+                            <pre style={{
+                                fontSize: "0.7rem", margin: 0, color: "var(--text-muted)",
+                                background: "rgba(0,0,0,0.2)", padding: "6px", borderRadius: "4px",
+                                overflowX: "auto", fontFamily: "var(--font-base)", whiteSpace: "pre-wrap"
+                            }}>
+                                {JSON.stringify(ev.input)}
+                            </pre>
                         </div>
-                    ))}
+                    )}
+                    {ev.kind === "tool_end" && (
+                        <div style={{
+                            borderLeft: "2px solid var(--border-subtle)",
+                            paddingLeft: "12px",
+                        }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px", color: "var(--text-secondary)" }}>
+                                <Check size={12} />
+                                <span style={{ fontSize: "0.75rem" }}>Result from <strong>{ev.tool}</strong></span>
+                            </div>
+                            <div className="prose-log" style={{
+                                fontSize: "0.75rem", margin: 0, color: "var(--text-muted)",
+                                background: "rgba(0,0,0,0.2)", padding: "8px 12px", borderRadius: "4px",
+                                maxHeight: "300px", overflowY: "auto"
+                            }}>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                    {ev.output}
+                                </ReactMarkdown>
+                            </div>
+                        </div>
+                    )}
+                    {ev.kind === "reasoning" && (
+                        <div className="prose-log" style={{ paddingLeft: "2px" }}>
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                {ev.content}
+                            </ReactMarkdown>
+                        </div>
+                    )}
                 </div>
-            )}
+            ))}
         </div>
     );
 };
@@ -156,8 +169,8 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
     const [tokenPreviewLines, setTokenPreviewLines] = useState<string[]>([]);
     const [activeTab, setActiveTab] = useState<"chat" | "library">("chat");
     const [mode, setMode] = useState<ResearchMode>(() => {
-        if (typeof window !== "undefined") return (localStorage.getItem(PREF_MODE_KEY) as ResearchMode) ?? "QUICK";
-        return "QUICK";
+        if (typeof window !== "undefined") return (localStorage.getItem(PREF_MODE_KEY) as ResearchMode) ?? "AUTO";
+        return "AUTO";
     });
     const [models, setModels] = useState<Model[]>([]);
     const [selectedModelId, setSelectedModelId] = useState<string>(() => {
@@ -311,7 +324,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                 session_id: sessionId ?? undefined,
                 model_name: selectedModelId,
                 provider: currentProvider,
-                forced_mode: mode,
+                forced_mode: mode === "AUTO" ? undefined : mode,
             }, abortRef.current.signal);
 
             if (!res.ok) throw new Error("Network error");
@@ -512,7 +525,7 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                     <MessageSquare size={18} color="var(--primary)" />
                     <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "var(--text-primary)" }}>Chat</span>
                     {sessionId && (
-                        <Badge variant="muted">{mode === "QUICK" ? "Quick" : mode === "CONTEXT" ? "Context" : "Deep"}</Badge>
+                        <Badge variant="muted">{mode === "AUTO" ? "Auto" : mode === "QUICK" ? "Quick" : mode === "CONTEXT" ? "Context" : "Deep"}</Badge>
                     )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -814,25 +827,47 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
             <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border-subtle)", flexShrink: 0 }}>
                 <form onSubmit={handleSubmit} style={{ display: "flex", gap: "8px", alignItems: "flex-end" }}>
                     <input type="file" ref={fileInputRef} onChange={handleFileUpload} style={{ display: "none" }} accept=".pdf,.txt" />
+                    {/* Compact mode cycling button */}
                     <button
                         type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={uploading}
-                        title="Upload document"
+                        onClick={() => {
+                            const modes: ResearchMode[] = ["AUTO", "QUICK", "CONTEXT", "DEEP"];
+                            const idx = modes.indexOf(mode);
+                            setMode(modes[(idx + 1) % modes.length]);
+                        }}
+                        title={`Mode: ${mode} — click to cycle`}
                         style={{
-                            background: "var(--bg-elevated)",
-                            border: "1px solid var(--border-subtle)",
-                            color: "var(--text-muted)",
-                            padding: "9px 11px",
+                            background: mode === "AUTO" ? "rgba(168,85,247,0.15)"
+                                : mode === "DEEP" ? "rgba(239,68,68,0.15)"
+                                    : mode === "CONTEXT" ? "rgba(88,166,255,0.15)"
+                                        : "var(--bg-elevated)",
+                            border: "1px solid " + (
+                                mode === "AUTO" ? "rgba(168,85,247,0.3)"
+                                    : mode === "DEEP" ? "rgba(239,68,68,0.3)"
+                                        : mode === "CONTEXT" ? "rgba(88,166,255,0.3)"
+                                            : "var(--border-subtle)"
+                            ),
+                            color: mode === "AUTO" ? "rgb(168,85,247)"
+                                : mode === "DEEP" ? "rgb(239,68,68)"
+                                    : mode === "CONTEXT" ? "var(--primary)"
+                                        : "var(--text-muted)",
+                            padding: "7px 10px",
                             borderRadius: "var(--radius-sm)",
                             cursor: "pointer",
                             display: "flex",
                             alignItems: "center",
+                            gap: "5px",
                             flexShrink: 0,
+                            fontSize: "0.72rem",
+                            fontWeight: 600,
                             transition: "all 0.2s ease",
+                            letterSpacing: "0.02em",
                         }}
                     >
-                        {uploading ? <Spinner size={16} /> : <Paperclip size={16} />}
+                        {mode === "AUTO" ? <><Sparkles size={14} /> Auto</>
+                            : mode === "QUICK" ? <><Zap size={14} /> Quick</>
+                                : mode === "CONTEXT" ? <><Search size={14} /> Ctx</>
+                                    : <><Brain size={14} /> Deep</>}
                     </button>
 
                     <input
@@ -850,13 +885,9 @@ export default function ChatInterface({ onNewWidget, sessionId, onSessionCreated
                     />
 
                     {loading ? (
-                        <Button type="button" variant="danger" onClick={handleStop} icon={<StopCircle size={16} />} size="md">
-                            Stop
-                        </Button>
+                        <Button type="button" variant="danger" onClick={handleStop} icon={<StopCircle size={16} />} size="md" />
                     ) : (
-                        <Button type="submit" disabled={!input.trim()} icon={<Send size={16} />} size="md">
-                            Send
-                        </Button>
+                        <Button type="submit" disabled={!input.trim()} icon={<Send size={16} />} size="md" />
                     )}
                 </form>
             </div>
