@@ -10,20 +10,14 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { type Mood, MOOD_STYLE, moodDot } from "@/lib/mood";
 import { Loader2, Radio, Flag } from "lucide-react";
 
 type Session = { session_key: number; session_name: string; country_name: string; circuit_short_name: string; date_start: string; year: number };
 type Driver = { driver_number: number; broadcast_name: string; team_name: string; team_colour: string };
 type Lap = { lap_number: number; lap_duration: number | null; date_start: string };
 type RadioClip = { driver_number: number; date: string; recording_url: string };
-type Mood = "calm" | "stressed" | "tired";
 type Analysis = { status: "pending" | "done" | "error"; text?: string; mood?: Mood; features?: Record<string, number> };
-
-const MOOD_STYLE: Record<Mood, string> = {
-  calm: "bg-success/15 text-success border-success/30",
-  stressed: "bg-destructive/15 text-destructive border-destructive/30",
-  tired: "bg-warning/15 text-warning border-warning/30",
-};
 
 function fmtLap(s: number | null) {
   if (!s) return "—";
@@ -61,7 +55,7 @@ function LapChart({ laps, highlightLap, moodByLap }: { laps: Lap[]; highlightLap
             title={`Lap ${l.lap_number}: ${fmtLap(l.lap_duration)}`}
             className={cn(
               "group relative flex-1 rounded-t-sm transition-all",
-              mood ? MOOD_STYLE[mood].split(" ")[0] : "bg-primary/30 hover:bg-primary/50",
+              mood ? moodDot(mood) : "bg-primary/30 hover:bg-primary/50",
               highlightLap === l.lap_number && "ring-2 ring-white"
             )}
             style={{ height: `${heightPct}%`, minWidth: Math.max(w, 0.5) + "%" }}
@@ -214,7 +208,7 @@ export default function F1() {
                 <div className="flex gap-3 text-xs text-muted-foreground">
                   {(["calm", "stressed", "tired"] as Mood[]).map((m) => (
                     <span key={m} className="flex items-center gap-1.5">
-                      <span className={cn("size-2 rounded-full", MOOD_STYLE[m].split(" ")[0])} /> {m}
+                      <span className={cn("size-2 rounded-full", moodDot(m))} /> {m}
                     </span>
                   ))}
                 </div>

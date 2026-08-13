@@ -17,13 +17,15 @@ async def emit(clip_id: str, stage: str, state: str, **kw):
                           json.dumps({"type": "stage", "stage": stage, "state": state, "t": time.time(), **kw}))
 
 
-async def emit_live(session_id: str, seq: int, text: str, error: str | None = None):
+async def emit_live(session_id: str, seq: int, text: str, mood: str | None = None,
+                     features: dict | None = None, error: str | None = None):
     # reuses the same job:{id} pubsub channel / WS route as clip processing —
     # the WS endpoint just forwards whatever's published, no live-specific plumbing needed
     if _redis is None:
         return
     await _redis.publish(f"job:{session_id}",
                           json.dumps({"type": "live_transcript", "seq": seq, "text": text,
+                                      "mood": mood, "features": features,
                                       "error": error, "t": time.time()}))
 
 

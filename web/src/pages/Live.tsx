@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { type Mood, MOOD_STYLE, moodDot } from "@/lib/mood";
 import { Mic, Square, Loader2 } from "lucide-react";
 
 // longer chunks = fewer mid-word cuts at chunk boundaries (a real accuracy cost —
@@ -11,7 +13,7 @@ import { Mic, Square, Loader2 } from "lucide-react";
 const CHUNK_MS = 7000;
 
 type ChunkStatus = "pending" | "done" | "error";
-type Chunk = { seq: number; text: string; status: ChunkStatus };
+type Chunk = { seq: number; text: string; status: ChunkStatus; mood?: Mood };
 
 export default function Live() {
   const [recording, setRecording] = useState(false);
@@ -62,10 +64,10 @@ export default function Live() {
 
     const ws = new WebSocket(`${location.origin.replace("http", "ws")}/v1/ws/jobs/${sessionId}`);
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data) as { type: string; seq: number; text: string; error?: string };
+      const msg = JSON.parse(e.data) as { type: string; seq: number; text: string; mood?: Mood; error?: string };
       if (msg.type !== "live_transcript") return;
       setChunks((prev) => prev.map((c) =>
-        c.seq === msg.seq ? { ...c, text: msg.text, status: msg.error ? "error" : "done" } : c));
+        c.seq === msg.seq ? { ...c, text: msg.text, mood: msg.mood, status: msg.error ? "error" : "done" } : c));
     };
     wsRef.current = ws;
 
@@ -83,16 +85,18 @@ export default function Live() {
 
   const transcript = chunks.map((c) => c.text).filter(Boolean).join(" ");
   const pendingCount = chunks.filter((c) => c.status === "pending").length;
+  const doneChunks = chunks.filter((c) => c.status === "done" && c.mood);
+  const currentMood = doneChunks.length ? doneChunks[doneChunks.length - 1].mood : undefined;
 
   return (
     <div>
       <PageHeader
         title="Live transcription"
-        description="Speak into your mic — transcript appears in ~5-8s chunks. Diarization and full audio quality analysis aren't run live; upload the recording afterward for the full pipeline."
+        description="Speak into your mic — transcript and stress read appear in ~5-8s chunks. Diarization and full audio quality analysis aren't run live; upload the recording afterward for the full pipeline."
       />
 
       <div className="mx-auto max-w-2xl px-8 py-8">
-        <div className="flex items-center justify-center">
+        <div className="flex items-center justify-center gap-3">
           <Button
             onClick={recording ? stop : start}
             size="lg"
@@ -102,6 +106,11 @@ export default function Live() {
             {recording ? <Square className="size-4 fill-current" /> : <Mic className="size-4" />}
             {recording ? "Stop" : "Start listening"}
           </Button>
+          {currentMood && (
+            <Badge variant="outline" className={cn("h-9 rounded-full px-4 text-sm capitalize", MOOD_STYLE[currentMood])}>
+              {currentMood}
+            </Badge>
+          )}
         </div>
 
         {recording && (
@@ -117,6 +126,21 @@ export default function Live() {
 
         {chunks.length > 0 && (
           <div className="mt-8 animate-slide-up rounded-xl border border-border bg-card p-5">
+            {doneChunks.length > 0 && (
+              <div className="mb-4 flex items-center gap-1">
+                {chunks.map((c) => (
+                  <span
+                    key={c.seq}
+                    title={c.mood ? `chunk ${c.seq}: ${c.mood}` : `chunk ${c.seq}`}
+                    className={cn(
+                      "h-2 flex-1 rounded-full",
+                      c.mood ? moodDot(c.mood) : "bg-muted"
+                    )}
+                  />
+                ))}
+              </div>
+            )}
+
             <p className="mb-2 text-xs font-medium text-muted-foreground">Live transcript</p>
             <p className="whitespace-pre-wrap leading-relaxed">
               {transcript || <span className="text-muted-foreground">Listening…</span>}
@@ -133,6 +157,9 @@ export default function Live() {
                     c.status === "error" && "bg-destructive"
                   )} />
                   chunk {c.seq}
+                  {c.mood && c.status === "done" && (
+                    <span className={cn("rounded px-1.5 py-0.5 capitalize", MOOD_STYLE[c.mood])}>{c.mood}</span>
+                  )}
                   {c.status === "error" && " — failed"}
                 </div>
               ))}

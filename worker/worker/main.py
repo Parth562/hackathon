@@ -88,7 +88,7 @@ async def transcribe_live_chunk_job(ctx, session_id: str, chunk_rel_path: str, s
     # chunk is what keeps this "near-live" instead of adding another 20-40s of lag
     cfg = get_settings()
     path = storage.resolve(cfg, chunk_rel_path)
-    text, error = "", None
+    text, mood, features, error = "", "calm", tone_mod.NEUTRAL_FEATURES, None
 
     pinned = None if cfg.asr_language == "auto" else cfg.asr_language
     lang_state = None
@@ -105,24 +105,33 @@ async def transcribe_live_chunk_job(ctx, session_id: str, chunk_rel_path: str, s
         async with ctx["live_sem"]:
             audio = await asyncio.to_thread(decode_to_array, path, SR)
             audio = await asyncio.to_thread(_precondition, audio, cfg)
-            segments, info = await asyncio.to_thread(
-                ctx["pool"].asr.transcribe, audio, language=lang_arg, beam_size=cfg.asr_beam_size,
-                word_timestamps=False, condition_on_previous_text=False,
-                temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
-                compression_ratio_threshold=2.4, log_prob_threshold=-1.0,
-                no_speech_threshold=0.6, vad_filter=True)
-            segs = [{"text": s.text.strip(), "avg_logprob": s.avg_logprob, "no_speech_prob": s.no_speech_prob}
-                    for s in segments]
-            text = " ".join(s["text"] for s in segs
-                             if not _is_hallucination(s["text"], s["avg_logprob"], s["no_speech_prob"])).strip()
-            if lang_state is not None and info.language_probability > 0.6:
-                lang_state["lang"] = info.language
-    except ValueError as e:
-        # vad_filter drops 100% of a pure-silence chunk and faster-whisper's internal
-        # duration calc does max() on the (now empty) speech-chunk list — not a real error
-        if "empty sequence" not in str(e):
-            error = str(e)[:200]
-            log.warning("live_chunk_failed", session_id=session_id, seq=seq, error=error)
+            duration_s = len(audio) / SR
+
+            # ASR and tone analysis are independent signals from the same audio — a whisper
+            # hiccup (vad_filter finding 0 speech in a short/quiet chunk) shouldn't also
+            # blank out the tone read, and vice versa (see analyze_f1_radio_job, same pattern)
+            try:
+                segments, info = await asyncio.to_thread(
+                    ctx["pool"].asr.transcribe, audio, language=lang_arg, beam_size=cfg.asr_beam_size,
+                    word_timestamps=False, condition_on_previous_text=False,
+                    temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                    compression_ratio_threshold=2.4, log_prob_threshold=-1.0,
+                    no_speech_threshold=0.6, vad_filter=True)
+                segs = [{"text": s.text.strip(), "avg_logprob": s.avg_logprob, "no_speech_prob": s.no_speech_prob}
+                        for s in segments]
+                text = " ".join(s["text"] for s in segs
+                                 if not _is_hallucination(s["text"], s["avg_logprob"], s["no_speech_prob"])).strip()
+                if lang_state is not None and info.language_probability > 0.6:
+                    lang_state["lang"] = info.language
+            except ValueError as e:
+                # vad_filter drops 100% of a pure-silence chunk and faster-whisper's internal
+                # duration calc does max() on the (now empty) speech-chunk list — not a real error
+                if "empty sequence" not in str(e):
+                    raise
+
+            word_count = len(text.split())
+            features = await asyncio.to_thread(tone_mod.extract_features, audio, SR, word_count, duration_s)
+            mood = tone_mod.classify(features)
     except Exception as e:
         error = str(e)[:200]
         log.warning("live_chunk_failed", session_id=session_id, seq=seq, error=error)
@@ -131,7 +140,7 @@ async def transcribe_live_chunk_job(ctx, session_id: str, chunk_rel_path: str, s
             os.remove(path)
         except OSError:
             pass
-    await emit_live(session_id, seq, text, error)
+    await emit_live(session_id, seq, text, mood, features, error)
 
 
 async def analyze_f1_radio_job(ctx, job_id: str, rel_path: str):
