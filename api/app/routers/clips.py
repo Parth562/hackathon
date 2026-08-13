@@ -224,8 +224,15 @@ async def assign_speaker(clip_id: str, local_label: str, body: AssignBody, user=
 
     profile_id = body.profile_id
     if body.create_profile:
-        profile_id = await db.insert("speaker_profiles", {
-            "display_name": body.create_profile["display_name"], "status": "provisional"})
+        name = body.create_profile["display_name"]
+        # correcting the same name across clips should accumulate enrollments into one
+        # profile, not fragment into a new empty profile every time — a profile with
+        # several averaged enrollments identifies far more reliably than several
+        # profiles with one (or zero) each
+        existing = await db.fetchrow(
+            "SELECT id FROM speaker_profiles WHERE lower(display_name)=lower($1)", name)
+        profile_id = existing["id"] if existing else await db.insert(
+            "speaker_profiles", {"display_name": name, "status": "provisional"})
     if body.mark_unknown:
         profile_id = None
 
@@ -236,11 +243,17 @@ async def assign_speaker(clip_id: str, local_label: str, body: AssignBody, user=
         """UPDATE utterances SET profile_id=$1 WHERE clip_id=$2 AND local_label=$3""",
         profile_id, clip_id, local_label)
 
-    enrolled = False
-    if body.enroll and profile_id and cs["embedding"] is not None and (cs["reliability"] or 0) >= (await get_effective_settings()).reliability_fair:
-        await sc.add_enrollment(profile_id, cs, clip_id, source="manual", actor=user)
-        enrolled = True
+    enrolled, skip_reason = False, None
+    if body.enroll and profile_id:
+        if cs["embedding"] is None:
+            skip_reason = "not enough clean (non-overlapping) speech from this speaker to build a voiceprint"
+        elif (cs["reliability"] or 0) < (await get_effective_settings()).reliability_fair:
+            skip_reason = f"voiceprint reliability too low ({cs['reliability'] or 0:.2f})"
+        else:
+            await sc.add_enrollment(profile_id, cs, clip_id, source="manual", actor=user)
+            enrolled = True
 
     await audit_mod.audit("identification.correct", "clip_speaker", f"{clip_id}:{local_label}",
-                           before=before, after={"profile_id": profile_id}, actor=user)
-    return {"ok": True, "profile_id": profile_id, "enrolled": enrolled, "was": before}
+                           before=before, after={"profile_id": str(profile_id) if profile_id else None}, actor=user)
+    return {"ok": True, "profile_id": profile_id, "enrolled": enrolled,
+            "enroll_skip_reason": skip_reason, "was": before}

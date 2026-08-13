@@ -73,12 +73,18 @@ async def identify(emb: np.ndarray, reliability: float, cfg) -> Match:
 
 
 async def add_enrollment(profile_id: str, sp, clip_id: str, source: str, actor=None) -> str:
-    reliability = sp["reliability"] if isinstance(sp, dict) else sp.reliability
-    embedding = sp["embedding"] if isinstance(sp, dict) else sp.embedding
+    # called with either a SpeakerResult dataclass (attribute access only) from the worker
+    # or an asyncpg.Record (dict-like __getitem__, but NOT a dict instance and no attribute
+    # access) from the API's manual-correction endpoint — isinstance(sp, dict) is false for
+    # both dataclasses AND Record, so it always fell through to attribute access and crashed
+    # on Record. hasattr(sp, "keys") is true for dict and Record, false for the dataclass.
+    dict_like = hasattr(sp, "keys")
+    reliability = sp["reliability"] if dict_like else sp.reliability
+    embedding = sp["embedding"] if dict_like else sp.embedding
     if reliability is None or reliability < 0:
         raise ValueError("missing reliability")
-    speech_s = sp["speech_s"] if isinstance(sp, dict) else sp.speech_s
-    local_label = sp["local_label"] if isinstance(sp, dict) else sp.local_label
+    speech_s = sp["speech_s"] if dict_like else sp.speech_s
+    local_label = sp["local_label"] if dict_like else sp.local_label
 
     eid = await db.insert("speaker_enrollments", {
         "profile_id": profile_id, "clip_id": clip_id, "local_label": local_label,

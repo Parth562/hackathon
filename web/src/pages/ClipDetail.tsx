@@ -78,12 +78,18 @@ export default function ClipDetail() {
   const displayName = (label: string) =>
     speakers?.find((s: any) => s.local_label === label)?.display_name || label;
 
-  async function assign(label: string, body: object) {
+  async function assign(label: string, body: { enroll?: boolean; [k: string]: unknown }) {
     if (!id) return;
-    await api.assignSpeaker(id, label, body);
+    const res = await api.assignSpeaker(id, label, body);
     setAssigning(null);
     setName("");
-    toast.success("Speaker updated");
+    if (body.enroll && !res.enrolled) {
+      toast.warning("Speaker labeled, but not enrolled", {
+        description: res.enroll_skip_reason || "This clip's audio wasn't usable for identification.",
+      });
+    } else {
+      toast.success("Speaker updated");
+    }
     load();
   }
 

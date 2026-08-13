@@ -18,7 +18,7 @@ async def audit(action: str, object_type: str, object_id, before=None, after=Non
                                   corr_id, prev_hash, row_hash)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)""",
         actor, action, object_type, str(object_id),
-        json.dumps(before) if before is not None else None,
-        json.dumps(after) if after is not None else None,
+        json.dumps(before, default=str) if before is not None else None,
+        json.dumps(after, default=str) if after is not None else None,
         corr_id, prev, row_hash,
     )
