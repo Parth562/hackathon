@@ -1,14 +1,17 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { AudioPlayer } from "@/components/audio-player";
 import { cn } from "@/lib/utils";
 import {
   UploadCloud, FileAudio, CheckCircle2, XCircle, Loader2, X,
 } from "lucide-react";
+
+const API_KEY = () => localStorage.getItem("api_key") || "change-me";
 
 type StageEvent = {
   type: string; stage?: string; state?: string; ms?: number; code?: string; message?: string;
@@ -30,8 +33,18 @@ export default function Upload() {
   const [dragging, setDragging] = useState(false);
   const [events, setEvents] = useState<StageEvent[]>([]);
   const [busy, setBusy] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [clipId, setClipId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  // object URL so the raw upload is audible immediately, before any processing happens
+  useEffect(() => {
+    if (!file) { setPreviewUrl(null); return; }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -44,8 +57,10 @@ export default function Upload() {
     if (!file) return;
     setBusy(true);
     setEvents([]);
+    setClipId(null);
     try {
       const res = await api.uploadClip(file);
+      setClipId(res.clip_id);
       if (res.duplicate) {
         toast.info("This clip was already processed — jumping to its results.");
         navigate(`/clips/${res.clip_id}`);
@@ -146,6 +161,13 @@ export default function Upload() {
           )}
         </div>
 
+        {previewUrl && !busy && events.length === 0 && (
+          <div className="mt-4 animate-slide-up">
+            <p className="mb-1.5 text-xs font-medium text-muted-foreground">Preview before uploading</p>
+            <AudioPlayer src={previewUrl} />
+          </div>
+        )}
+
         <Button onClick={submit} disabled={!file || busy} className="mt-6 w-full gap-2" size="lg">
           {busy && <Loader2 className="size-4 animate-spin" />}
           {busy ? "Processing…" : "Upload & process"}
@@ -198,6 +220,15 @@ export default function Upload() {
                 );
               })}
             </div>
+
+            {clipId && stageStates.get("PREPROCESSING") === "done" && (
+              <div className="animate-slide-up">
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                  Processed audio (denoised · normalized) — what the pipeline actually hears from here on
+                </p>
+                <AudioPlayer src={`/v1/clips/${clipId}/audio?variant=work&key=${API_KEY()}`} />
+              </div>
+            )}
           </div>
         )}
       </div>

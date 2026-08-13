@@ -39,7 +39,22 @@ for _name, _ in STAGES:
     _running += STAGE_WEIGHTS[_name]
 
 
+# Tables holding derived-per-clip data that stages INSERT into. Deleted (not upserted)
+# at the start of every run — including the first — so reprocess() doesn't hit unique
+# constraints (quality_metrics.clip_id is a PK) or leave stale duplicate rows behind
+# from a previous attempt (vad_regions, speaker_turns have no such constraint, so without
+# this they'd silently accumulate duplicates instead of erroring). ON DELETE CASCADE on
+# transcripts/clip_id takes utterances and words with it.
+_DERIVED_TABLES = ["quality_metrics", "vad_regions", "speaker_turns", "transcripts", "clip_speakers"]
+
+
+async def _reset_derived_data(clip_id: str):
+    for table in _DERIVED_TABLES:
+        await db.execute(f"DELETE FROM {table} WHERE clip_id=$1", clip_id)
+
+
 async def process_clip(clip_id: str, pool, cfg):
+    await _reset_derived_data(clip_id)
     corr = uuid.uuid4().hex[:12]
     run_id = await db.insert("processing_runs", {
         "clip_id": clip_id, "pipeline_version": PIPELINE_VERSION,

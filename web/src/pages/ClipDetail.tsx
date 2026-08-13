@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { api } from "@/api/client";
 import { StatusBadge } from "@/components/status-badge";
+import { AudioPlayer } from "@/components/audio-player";
 import { speakerColor } from "@/lib/speaker-color";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -28,11 +29,39 @@ export default function ClipDetail() {
   const [assigning, setAssigning] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [reprocessing, setReprocessing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [variant, setVariant] = useState<"original" | "work">("work");
+  // {nonce} forces the AudioPlayer's seek effect to re-fire even when clicking the same
+  // word/utterance twice in a row, which a plain `number | null` state wouldn't (React
+  // skips effects whose dependency didn't change value).
+  const [seekTo, setSeekTo] = useState<{ time: number; nonce: number } | null>(null);
+  const seek = (time: number) => setSeekTo((prev) => ({ time, nonce: (prev?.nonce ?? 0) + 1 }));
+  const activeRowRef = useRef<HTMLDivElement>(null);
 
   async function load() {
     if (id) setResult(await api.getResult(id));
   }
   useEffect(() => { load(); }, [id]);
+
+  const wordsByUtterance = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const w of result?.words || []) {
+      if (!map.has(w.utterance_id)) map.set(w.utterance_id, []);
+      map.get(w.utterance_id)!.push(w);
+    }
+    return map;
+  }, [result]);
+
+  const activeUtteranceId = useMemo(() => {
+    for (const u of result?.utterances || []) {
+      if (currentTime >= u.start_s && currentTime < u.end_s) return u.id;
+    }
+    return null;
+  }, [result, currentTime]);
+
+  useEffect(() => {
+    activeRowRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [activeUtteranceId]);
 
   if (!result) {
     return (
@@ -44,8 +73,10 @@ export default function ClipDetail() {
     );
   }
 
-  const { clip, quality, speakers, utterances, run } = result;
+  const { clip, quality, speakers, utterances, turns, run } = result;
   const warnings: any[] = run?.warnings || [];
+  const displayName = (label: string) =>
+    speakers?.find((s: any) => s.local_label === label)?.display_name || label;
 
   async function assign(label: string, body: object) {
     if (!id) return;
@@ -121,10 +152,30 @@ export default function ClipDetail() {
       </div>
 
       <div className="mx-auto max-w-4xl space-y-6 px-8 py-6">
-        <audio
-          controls
-          src={`/v1/clips/${id}/audio?key=${API_KEY()}`}
-          className="w-full rounded-xl"
+        {clip.work_path && (
+          <div className="flex items-center gap-1 rounded-lg bg-muted p-1 text-xs">
+            {(["original", "work"] as const).map((v) => (
+              <button
+                key={v}
+                onClick={() => setVariant(v)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 font-medium transition-colors",
+                  variant === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {v === "original" ? "Original upload" : "Processed (denoised · normalized)"}
+              </button>
+            ))}
+          </div>
+        )}
+        <AudioPlayer
+          key={variant}
+          src={`/v1/clips/${id}/audio?variant=${variant}&key=${API_KEY()}`}
+          duration={clip.duration_s || 0}
+          turns={turns || []}
+          speakers={speakers || []}
+          onTimeUpdate={setCurrentTime}
+          seekTo={seekTo}
         />
 
         {warnings.map((w, i) => (
@@ -195,23 +246,52 @@ export default function ClipDetail() {
           <CardHeader>
             <CardTitle className="text-base">Transcript</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {(utterances || []).map((u: any) => (
-              <div key={u.id} className="flex gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-white/[0.03]">
-                <span className={cn(
-                  "mt-0.5 h-fit shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-                  speakerColor(u.local_label).chip
-                )}>
-                  {u.local_label}
-                </span>
-                <p
-                  className="leading-relaxed"
-                  title={`word conf ${u.mean_word_conf?.toFixed(2)} · speaker conf ${u.mean_speaker_conf?.toFixed(2)}`}
+          <CardContent className="space-y-1">
+            {(utterances || []).map((u: any) => {
+              const active = u.id === activeUtteranceId;
+              const words = wordsByUtterance.get(u.id);
+              return (
+                <div
+                  key={u.id}
+                  ref={active ? activeRowRef : undefined}
+                  onClick={() => seek(u.start_s)}
+                  className={cn(
+                    "flex cursor-pointer gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors hover:bg-white/[0.03]",
+                    active && "border-primary/30 bg-primary/5"
+                  )}
                 >
-                  {u.text}
-                </p>
-              </div>
-            ))}
+                  <span className={cn(
+                    "mt-0.5 h-fit shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
+                    speakerColor(u.local_label).chip
+                  )}>
+                    {displayName(u.local_label)}
+                  </span>
+                  <p
+                    className="leading-relaxed"
+                    title={`word conf ${u.mean_word_conf?.toFixed(2)} · speaker conf ${u.mean_speaker_conf?.toFixed(2)}`}
+                  >
+                    {words ? words.map((w: any, i: number) => {
+                      const wordActive = active && currentTime >= w.start_s && currentTime < w.end_s;
+                      const spoken = active && currentTime >= w.end_s;
+                      return (
+                        <span
+                          key={i}
+                          onClick={(e) => { e.stopPropagation(); seek(w.start_s); }}
+                          className={cn(
+                            "rounded transition-colors",
+                            wordActive && "bg-primary/30 text-foreground",
+                            spoken && !wordActive && "text-foreground/70",
+                            !active && "text-foreground"
+                          )}
+                        >
+                          {w.word}{" "}
+                        </span>
+                      );
+                    }) : u.text}
+                  </p>
+                </div>
+              );
+            })}
             {(!utterances || utterances.length === 0) && (
               <p className="py-4 text-center text-sm text-muted-foreground">No transcript available.</p>
             )}

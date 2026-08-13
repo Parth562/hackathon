@@ -46,9 +46,9 @@ async def upload_clip(file: UploadFile = File(...), tags: str = "", notes: str =
         "size_bytes": size, "raw_path": "", "tags": tags.split(",") if tags else [],
         "notes": notes or None,
     })
-    final_path = storage.raw_path(cfg, clip_id, ext)
-    tmp_path.rename(final_path)
-    await db.execute("UPDATE clips SET raw_path=$1 WHERE id=$2", final_path, clip_id)
+    rel_path = storage.raw_path(cfg, clip_id, ext)
+    tmp_path.rename(storage.resolve(cfg, rel_path))
+    await db.execute("UPDATE clips SET raw_path=$1 WHERE id=$2", rel_path, clip_id)
     await audit_mod.audit("clip.upload", "clip", clip_id, after={"filename": file.filename}, actor=user)
 
     job_id = await queue.enqueue_clip(clip_id)
@@ -130,11 +130,15 @@ async def get_result(clip_id: str, user=Depends(get_current_user)):
 
 @router.get("/{clip_id}/audio")
 async def get_audio(clip_id: str, variant: str = "original", user=Depends(get_current_user)):
+    cfg = get_settings()
     clip = await db.fetchrow("SELECT raw_path, work_path FROM clips WHERE id=$1", clip_id)
     if not clip:
         raise HTTPException(404, "clip not found")
-    path = clip["work_path"] if variant == "work" and clip["work_path"] else clip["raw_path"]
-    if not path or not os.path.exists(path):
+    rel_path = clip["work_path"] if variant == "work" and clip["work_path"] else clip["raw_path"]
+    if not rel_path:
+        raise HTTPException(404, "audio not available")
+    path = storage.resolve(cfg, rel_path)
+    if not os.path.exists(path):
         raise HTTPException(404, "audio not available")
     return FileResponse(path)
 

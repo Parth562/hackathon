@@ -5,7 +5,9 @@ from ..errors import RejectError
 
 async def run(ctx):
     row = await db.fetchrow("SELECT raw_path FROM clips WHERE id=$1", ctx.clip_id)
-    ctx.raw_path = row["raw_path"]
+    # raw_path is stored relative to DATA_DIR (see common/storage.py) — resolve once here
+    # so every later use of ctx.raw_path in this process gets a correct absolute path.
+    ctx.raw_path = storage.resolve(ctx.cfg, row["raw_path"])
 
     probe = ffprobe(ctx.raw_path)
     if not probe.get("audio_streams"):

@@ -35,9 +35,9 @@ async def run(ctx):
         ctx.warn("POOR_AUDIO_QUALITY", snr_db=ctx.quality["snr_db"],
                   clipping_ratio=ctx.quality["clipping_ratio"], bandwidth_hz=ctx.quality["bandwidth_hz"])
 
-    work_wav = storage.work_path(ctx.cfg, ctx.clip_id, "clean.wav")
-    write_wav(work_wav, ctx.audio_clean, SR)
-    await db.execute("UPDATE clips SET work_path=$2 WHERE id=$1", ctx.clip_id, work_wav)
+    work_wav_rel = storage.work_path(ctx.cfg, ctx.clip_id, "clean.wav")
+    write_wav(storage.resolve(ctx.cfg, work_wav_rel), ctx.audio_clean, SR)
+    await db.execute("UPDATE clips SET work_path=$2 WHERE id=$1", ctx.clip_id, work_wav_rel)
 
     q = ctx.quality
     await db.execute(

@@ -129,11 +129,11 @@ async def assign_cluster(emb: np.ndarray, speech_s: float, cfg) -> str:
         cid = hits[0]["id"]
         row = await db.fetchrow("SELECT centroid, n_members, total_speech_s FROM speaker_clusters WHERE id=$1", cid)
         n = row["n_members"]
-        old_c = np.array(row["centroid"], dtype=np.float32) if row["centroid"] else emb
+        old_c = np.array(row["centroid"], dtype=np.float32) if row["centroid"] is not None else emb
         new_c = (old_c * n + emb) / (n + 1)
         new_c /= max(float(np.linalg.norm(new_c)), 1e-6)
         await db.execute(
-            "UPDATE speaker_clusters SET centroid=$2, n_members=$3, total_speech_s=total_speech_s+$4, updated_at=now() WHERE id=$1",
+            "UPDATE speaker_clusters SET centroid=$2, n_members=$3, total_speech_s=total_speech_s+$4 WHERE id=$1",
             cid, list(map(float, new_c)), n + 1, speech_s)
         return cid
     return await db.insert("speaker_clusters", {
