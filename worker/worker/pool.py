@@ -51,6 +51,20 @@ class ModelPool:
 
         self.diar = Pipeline.from_pretrained(str(md / "diar" / self.cfg.diar_model / "config.yaml"))
         self.diar.to(torch.device(self.device))
+        # pyannote defaults to batch_size=1 for both sub-models, i.e. one forward pass per
+        # sliding-window chunk — on CPU that per-call overhead dominates. Batching chunks
+        # together is the single biggest lever for CPU diarization latency (no accuracy
+        # tradeoff, same chunks/weights, just processed together).
+        if self.device == "cpu":
+            self.diar._segmentation.batch_size = 64
+            self.diar.embedding_batch_size = 64
+            # ponytail: default sliding-window stride is 10% of window duration (90%
+            # overlap) — great for accuracy, expensive on CPU. Widening to 50% overlap
+            # cuts the chunk count ~5x; min_turn_s + VAD-snapping in diarize.py already
+            # smooth turn boundaries, so this is a reasonable throughput/precision
+            # tradeoff. Drop back toward *0.1 if diarization boundaries get noticeably
+            # sloppier than this is worth.
+            self.diar._segmentation.step = self.diar._segmentation.duration * 0.5
 
         embed_dir = str(md / "embed" / self.cfg.embed_model)
         self.embedder = EncoderClassifier.from_hparams(

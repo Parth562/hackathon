@@ -26,3 +26,8 @@ async def enqueue_clip(clip_id: str) -> str:
     # the websocket contract.
     await _redis.enqueue_job("process_clip_job", clip_id, _job_id=f"clip-{clip_id}-{uuid.uuid4().hex[:8]}")
     return clip_id
+
+
+async def enqueue_live_chunk(session_id: str, chunk_rel_path: str, seq: int):
+    await _redis.enqueue_job("transcribe_live_chunk_job", session_id, chunk_rel_path, seq,
+                              _job_id=f"live-{session_id}-{seq}-{uuid.uuid4().hex[:8]}")

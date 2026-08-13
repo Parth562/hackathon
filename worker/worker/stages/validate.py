@@ -1,3 +1,5 @@
+import asyncio
+
 from common import db, storage
 from ..audio.decode import ffprobe
 from ..errors import RejectError
@@ -9,7 +11,8 @@ async def run(ctx):
     # so every later use of ctx.raw_path in this process gets a correct absolute path.
     ctx.raw_path = storage.resolve(ctx.cfg, row["raw_path"])
 
-    probe = ffprobe(ctx.raw_path)
+    # ffprobe shells out and blocks; off the event loop so other clips' jobs keep moving
+    probe = await asyncio.to_thread(ffprobe, ctx.raw_path)
     if not probe.get("audio_streams"):
         raise RejectError("NO_AUDIO_STREAM", "file contains no audio track")
 

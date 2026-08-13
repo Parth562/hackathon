@@ -1,19 +1,31 @@
 import { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { toast } from "sonner";
 import { api } from "@/api/client";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AudioLines, Search, Upload as UploadIcon, AlertTriangle, Users2 } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import {
+  AudioLines, Search, Upload as UploadIcon, AlertTriangle, Users2, MoreVertical, Pencil, Trash2,
+} from "lucide-react";
 
 type Clip = {
   id: string; filename: string; duration_s: number; status: string;
   language: string; n_speakers: number; needs_review: boolean; created_at: string;
 };
+
+type EditState = { id: string; filename: string; notes: string; tags: string; needs_review: boolean };
 
 function fmtDuration(s: number) {
   if (!s) return "—";
@@ -26,6 +38,8 @@ export default function Library() {
   const [clips, setClips] = useState<Clip[] | null>(null);
   const [q, setQ] = useState("");
   const [needsReview, setNeedsReview] = useState(false);
+  const [edit, setEdit] = useState<EditState | null>(null);
+  const [saving, setSaving] = useState(false);
   const navigate = useNavigate();
 
   async function load() {
@@ -42,6 +56,45 @@ export default function Library() {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, needsReview]);
+
+  async function openEdit(clip: Clip) {
+    const full = await api.getClip(clip.id);
+    setEdit({
+      id: clip.id, filename: clip.filename,
+      notes: full.notes || "", tags: (full.tags || []).join(", "),
+      needs_review: full.needs_review,
+    });
+  }
+
+  async function saveEdit() {
+    if (!edit) return;
+    setSaving(true);
+    try {
+      await api.patchClip(edit.id, {
+        notes: edit.notes,
+        tags: edit.tags.split(",").map((t) => t.trim()).filter(Boolean),
+        needs_review: edit.needs_review,
+      });
+      toast.success("Clip updated");
+      setEdit(null);
+      load();
+    } catch (e) {
+      toast.error("Update failed", { description: String(e) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeClip(clip: Clip) {
+    if (!confirm(`Delete "${clip.filename}"? This permanently removes the audio and all results.`)) return;
+    try {
+      await api.deleteClip(clip.id);
+      toast.success("Clip deleted");
+      load();
+    } catch (e) {
+      toast.error("Delete failed", { description: String(e) });
+    }
+  }
 
   return (
     <div>
@@ -110,6 +163,7 @@ export default function Library() {
                   <TableHead>Language</TableHead>
                   <TableHead>Speakers</TableHead>
                   <TableHead className="text-right">Uploaded</TableHead>
+                  <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -149,6 +203,23 @@ export default function Library() {
                     <TableCell className="text-right text-muted-foreground">
                       {new Date(c.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
                     </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                            <MoreVertical className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEdit(c)}>
+                            <Pencil className="size-3.5" /> Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem variant="destructive" onClick={() => removeClip(c)}>
+                            <Trash2 className="size-3.5" /> Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -156,6 +227,49 @@ export default function Library() {
           </div>
         )}
       </div>
+
+      <Dialog open={edit != null} onOpenChange={(open) => !open && setEdit(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit clip</DialogTitle>
+          </DialogHeader>
+          {edit && (
+            <div className="space-y-4">
+              <p className="truncate text-sm text-muted-foreground">{edit.filename}</p>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Tags (comma-separated)</label>
+                <Input
+                  value={edit.tags}
+                  onChange={(e) => setEdit({ ...edit, tags: e.target.value })}
+                  placeholder="meeting, follow-up"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Notes</label>
+                <Textarea
+                  value={edit.notes}
+                  onChange={(e) => setEdit({ ...edit, notes: e.target.value })}
+                  rows={4}
+                />
+              </div>
+              <Button
+                type="button"
+                variant={edit.needs_review ? "default" : "outline"}
+                size="sm"
+                className="gap-1.5"
+                onClick={() => setEdit({ ...edit, needs_review: !edit.needs_review })}
+              >
+                <AlertTriangle className="size-3.5" />
+                {edit.needs_review ? "Flagged for review" : "Not flagged"}
+              </Button>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

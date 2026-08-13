@@ -11,8 +11,11 @@ export default defineConfig({
     },
   },
   server: {
+    port: 5174,
+    strictPort: true,
     proxy: {
-      "/v1": "http://localhost:8000",
+      // shorthand string form doesn't upgrade websockets — /v1/ws/jobs/* needs ws:true
+      "/v1": { target: "http://localhost:8000", ws: true },
     },
   },
 });

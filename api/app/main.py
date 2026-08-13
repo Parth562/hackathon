@@ -9,7 +9,7 @@ from common.config import get_settings
 from common import db
 from .observability import configure_logging
 from .services import queue
-from .routers import clips, speakers, clusters, search, admin, models, ws
+from .routers import clips, speakers, clusters, search, admin, models, ws, live
 
 
 @asynccontextmanager
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Speaker Intelligence Workbench", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-for r in (clips.router, speakers.router, clusters.router, search.router, admin.router, models.router):
+for r in (clips.router, speakers.router, clusters.router, search.router, admin.router, models.router, live.router):
     app.include_router(r)
 app.include_router(ws.router)
 

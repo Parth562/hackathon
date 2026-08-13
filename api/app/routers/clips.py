@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import os
@@ -33,7 +34,7 @@ async def upload_clip(file: UploadFile = File(...), tags: str = "", notes: str =
                 tmp_path.unlink(missing_ok=True)
                 raise HTTPException(413, f"file exceeds {cfg.max_upload_mb}MB limit")
             h.update(chunk)
-            out.write(chunk)
+            await asyncio.to_thread(out.write, chunk)
     sha = h.hexdigest()
 
     existing = await db.fetchrow("SELECT id, status FROM clips WHERE sha256=$1", sha)

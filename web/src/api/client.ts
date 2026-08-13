@@ -12,6 +12,7 @@ async function req(path: string, opts: RequestInit = {}) {
 export const api = {
   listClips: (params: Record<string, string> = {}) =>
     req(`/v1/clips?${new URLSearchParams(params)}`),
+  getClip: (id: string) => req(`/v1/clips/${id}`),
   getResult: (id: string) => req(`/v1/clips/${id}/result`),
   uploadClip: (file: File) => {
     const fd = new FormData();
@@ -19,6 +20,17 @@ export const api = {
     return req("/v1/clips", { method: "POST", body: fd });
   },
   deleteClip: (id: string) => req(`/v1/clips/${id}`, { method: "DELETE" }),
+  patchClip: (id: string, body: { tags?: string[]; notes?: string; needs_review?: boolean }) =>
+    req(`/v1/clips/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  uploadLiveChunk: (sessionId: string, seq: number, blob: Blob) => {
+    const fd = new FormData();
+    fd.append("file", blob, `${seq}.webm`);
+    return req(`/v1/live/${sessionId}/chunk?seq=${seq}`, { method: "POST", body: fd });
+  },
   reprocess: (id: string) => req(`/v1/clips/${id}/reprocess`, { method: "POST" }),
   assignSpeaker: (clipId: string, label: string, body: object) =>
     req(`/v1/clips/${clipId}/speakers/${label}/assign`, {

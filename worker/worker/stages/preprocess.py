@@ -1,3 +1,5 @@
+import asyncio
+
 import numpy as np
 
 from common import db, storage
@@ -9,34 +11,46 @@ from ..audio.quality import compute_quality
 from ..errors import RejectError
 
 
-async def run(ctx):
+def _decode_and_clean(ctx):
+    # ffmpeg subprocess + numpy/scipy/noisereduce CPU work — all blocking, so this
+    # whole chain runs in a worker thread (see run() below) rather than the shared
+    # event loop, so it doesn't stall every other clip's job while it runs.
     audio = decode_to_array(ctx.raw_path, SR)
     audio = audio - float(np.mean(audio))          # DC removal
     audio = highpass(audio, SR, ctx.cfg.highpass_hz)
 
     audio, input_lufs = loudness_normalize(audio, SR, ctx.cfg.target_lufs)
-    ctx.audio_norm = audio.copy()                  # fork: faithful copy for embeddings
+    audio_norm = audio.copy()                      # fork: faithful copy for embeddings
 
-    clean = denoise(audio, SR, ctx.cfg)
-    ctx.audio_clean = clean                         # denoised copy for ASR/diarization
+    audio_clean = denoise(audio, SR, ctx.cfg)
+    return audio_norm, audio_clean, input_lufs
 
-    clip_ratio = float(np.mean(np.abs(ctx.audio_norm) >= ctx.cfg.clipping_threshold))
 
-    ctx.vad = detect_vad(ctx.audio_clean, SR, ctx.pool.vad, ctx.cfg)
-    ctx.speech_s = sum(e - s for s, e in ctx.vad)
+def _vad_and_quality(ctx, audio_norm, audio_clean, input_lufs):
+    clip_ratio = float(np.mean(np.abs(audio_norm) >= ctx.cfg.clipping_threshold))
+    vad = detect_vad(audio_clean, SR, ctx.pool.vad, ctx.cfg)
+    speech_s = sum(e - s for s, e in vad)
 
-    if ctx.speech_s < ctx.cfg.min_total_speech_s:
-        flat = spectral_flatness(ctx.audio_norm)
+    if speech_s < ctx.cfg.min_total_speech_s:
+        flat = spectral_flatness(audio_norm)
         code = "NO_SPEECH_DETECTED" if flat < 0.4 else "INSUFFICIENT_SPEECH"
-        raise RejectError(code, f"only {ctx.speech_s:.2f}s of speech detected")
+        raise RejectError(code, f"only {speech_s:.2f}s of speech detected")
 
-    ctx.quality = compute_quality(ctx.audio_norm, ctx.vad, SR, clip_ratio, input_lufs, ctx.cfg)
+    quality = compute_quality(audio_norm, vad, SR, clip_ratio, input_lufs, ctx.cfg)
+    return vad, speech_s, quality
+
+
+async def run(ctx):
+    ctx.audio_norm, ctx.audio_clean, input_lufs = await asyncio.to_thread(_decode_and_clean, ctx)
+    ctx.vad, ctx.speech_s, ctx.quality = await asyncio.to_thread(
+        _vad_and_quality, ctx, ctx.audio_norm, ctx.audio_clean, input_lufs)
+
     if ctx.quality["grade"] == "poor":
         ctx.warn("POOR_AUDIO_QUALITY", snr_db=ctx.quality["snr_db"],
                   clipping_ratio=ctx.quality["clipping_ratio"], bandwidth_hz=ctx.quality["bandwidth_hz"])
 
     work_wav_rel = storage.work_path(ctx.cfg, ctx.clip_id, "clean.wav")
-    write_wav(storage.resolve(ctx.cfg, work_wav_rel), ctx.audio_clean, SR)
+    await asyncio.to_thread(write_wav, storage.resolve(ctx.cfg, work_wav_rel), ctx.audio_clean, SR)
     await db.execute("UPDATE clips SET work_path=$2 WHERE id=$1", ctx.clip_id, work_wav_rel)
 
     q = ctx.quality

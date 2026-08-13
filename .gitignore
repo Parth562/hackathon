@@ -42,3 +42,7 @@ web/tsconfig.tsbuildinfo
 
 # stray OneDrive sync-conflict copy — contains live API keys, never commit
 .env.onedrive-locked
+
+# local dev-server/worker stdout redirects, not build artifacts
+worker/worker_log*.txt
+web/vite_log*.txt
