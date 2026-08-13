@@ -83,10 +83,10 @@ export const api = {
   f1TeamRadio: (sessionKey: number, driverNumber: number) =>
     req(`/v1/f1/team_radio?session_key=${sessionKey}&driver_number=${driverNumber}`),
   f1TeamRadioAll: (sessionKey: number) => req(`/v1/f1/team_radio?session_key=${sessionKey}`),
-  f1Ingest: (recording_url: string) =>
+  f1Ingest: (recording_url: string, session_key?: number, driver_number?: number) =>
     req("/v1/f1/ingest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ recording_url }),
+      body: JSON.stringify({ recording_url, session_key, driver_number }),
     }),
 };

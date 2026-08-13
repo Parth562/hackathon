@@ -43,6 +43,10 @@ async def team_radio(session_key: int, driver_number: int | None = None, user=De
 
 class IngestBody(BaseModel):
     recording_url: str
+    # optional — when given, tone analysis calibrates against this driver's other radio
+    # calls in the same session instead of a fixed global pitch/rate threshold
+    session_key: int | None = None
+    driver_number: int | None = None
 
 
 @router.post("/ingest")
@@ -61,5 +65,5 @@ async def ingest(body: IngestBody, user=Depends(get_current_user)):
         r.raise_for_status()
         abs_path.write_bytes(r.content)
 
-    await queue.enqueue_f1_radio(job_id, rel_path)
+    await queue.enqueue_f1_radio(job_id, rel_path, body.session_key, body.driver_number)
     return {"job_id": job_id, "ws_url": f"/v1/ws/jobs/{job_id}"}

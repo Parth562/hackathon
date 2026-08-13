@@ -33,5 +33,7 @@ async def enqueue_live_chunk(session_id: str, chunk_rel_path: str, seq: int):
                               _job_id=f"live-{session_id}-{seq}-{uuid.uuid4().hex[:8]}")
 
 
-async def enqueue_f1_radio(job_id: str, rel_path: str):
-    await _redis.enqueue_job("analyze_f1_radio_job", job_id, rel_path, _job_id=f"f1-{job_id}")
+async def enqueue_f1_radio(job_id: str, rel_path: str, session_key: int | None = None,
+                            driver_number: int | None = None):
+    await _redis.enqueue_job("analyze_f1_radio_job", job_id, rel_path, session_key, driver_number,
+                              _job_id=f"f1-{job_id}")

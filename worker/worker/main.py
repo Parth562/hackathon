@@ -41,6 +41,10 @@ async def startup(ctx):
     # per-session language lock + periodic recheck state (see LIVE_LANG_RECHECK_EVERY) —
     # a fresh chunk re-guessing language from scratch every time is unstable on that little audio
     ctx["live_lang"] = {}
+    # per-session tone baseline (see tone.new_baseline) — keyed by live session_id or, for
+    # F1 radio, f"{session_key}:{driver_number}" so a driver's calls across a race calibrate
+    # against each other instead of a fixed global pitch/rate cutoff
+    ctx["tone_baseline"] = {}
     log.info("worker_ready", device=ctx["pool"].device, models=ctx["pool"].versions, load_ms=load_ms)
 
 
@@ -129,9 +133,16 @@ async def transcribe_live_chunk_job(ctx, session_id: str, chunk_rel_path: str, s
                 if "empty sequence" not in str(e):
                     raise
 
-            word_count = len(text.split())
-            features = await asyncio.to_thread(tone_mod.extract_features, audio, SR, word_count, duration_s)
-            mood = tone_mod.classify(features)
+            # a mood reading needs actual words behind it — acoustic-only features (pitch,
+            # energy) still "detect" tone on background noise/breathing when ASR found
+            # nothing to transcribe, which is how silent chunks were coming back "stressed"
+            if text:
+                word_count = len(text.split())
+                features = await asyncio.to_thread(tone_mod.extract_features, audio, SR, word_count, duration_s)
+                baseline = ctx["tone_baseline"].setdefault(session_id, tone_mod.new_baseline())
+                mood = tone_mod.classify(features, baseline)
+                if mood == "calm":
+                    tone_mod.update_baseline(baseline, features)
     except Exception as e:
         error = str(e)[:200]
         log.warning("live_chunk_failed", session_id=session_id, seq=seq, error=error)
@@ -143,10 +154,12 @@ async def transcribe_live_chunk_job(ctx, session_id: str, chunk_rel_path: str, s
     await emit_live(session_id, seq, text, mood, features, error)
 
 
-async def analyze_f1_radio_job(ctx, job_id: str, rel_path: str):
+async def analyze_f1_radio_job(ctx, job_id: str, rel_path: str, session_key: int | None = None,
+                                driver_number: int | None = None):
     cfg = get_settings()
     path = storage.resolve(cfg, rel_path)
     text, mood, features, error = "", "calm", tone_mod.NEUTRAL_FEATURES, None
+    baseline_key = f"{session_key}:{driver_number}" if session_key is not None else None
     try:
         async with ctx["live_sem"]:
             audio = await asyncio.to_thread(decode_to_array, path, SR)
@@ -170,9 +183,15 @@ async def analyze_f1_radio_job(ctx, job_id: str, rel_path: str):
                 if "empty sequence" not in str(e):
                     raise
 
-            word_count = len(text.split())
-            features = await asyncio.to_thread(tone_mod.extract_features, audio, SR, word_count, duration_s)
-            mood = tone_mod.classify(features)
+            # same reasoning as transcribe_live_chunk_job: no transcribed words means no
+            # trustworthy mood read, whatever the acoustic features happen to say
+            if text:
+                word_count = len(text.split())
+                features = await asyncio.to_thread(tone_mod.extract_features, audio, SR, word_count, duration_s)
+                baseline = ctx["tone_baseline"].setdefault(baseline_key, tone_mod.new_baseline()) if baseline_key else None
+                mood = tone_mod.classify(features, baseline)
+                if mood == "calm" and baseline is not None:
+                    tone_mod.update_baseline(baseline, features)
     except Exception as e:
         error = str(e)[:200]
         log.warning("f1_radio_failed", job_id=job_id, error=error)

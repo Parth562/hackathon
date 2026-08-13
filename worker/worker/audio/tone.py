@@ -54,13 +54,46 @@ def extract_features(audio: np.ndarray, sr: int, word_count: int, duration_s: fl
     }
 
 
-def classify(features: dict) -> str:
+MIN_BASELINE_SAMPLES = 3  # calm-classified chunks needed before trusting the session baseline over fixed thresholds
+BASELINE_ALPHA = 0.2  # EMA weight — slow enough to resist one noisy chunk, fast enough to track a session
+
+
+def new_baseline() -> dict:
+    return {"n": 0, "pitch_mean": 0.0, "pitch_std": 0.0, "rate": 0.0}
+
+
+def update_baseline(baseline: dict, features: dict) -> None:
+    if baseline["n"] == 0:
+        baseline["pitch_mean"] = features["pitch_mean_hz"]
+        baseline["pitch_std"] = features["pitch_std_hz"]
+        baseline["rate"] = features["speech_rate_wps"]
+    else:
+        a = BASELINE_ALPHA
+        baseline["pitch_mean"] += a * (features["pitch_mean_hz"] - baseline["pitch_mean"])
+        baseline["pitch_std"] += a * (features["pitch_std_hz"] - baseline["pitch_std"])
+        baseline["rate"] += a * (features["speech_rate_wps"] - baseline["rate"])
+    baseline["n"] += 1
+
+
+def classify(features: dict, baseline: dict | None = None) -> str:
     if features["voiced_ratio"] < 0.15:
         return "calm"  # too little voiced signal to say anything meaningful
 
     rate = features["speech_rate_wps"]
     pitch_mean = features["pitch_mean_hz"]
     pitch_std = features["pitch_std_hz"]
+
+    # fixed absolute thresholds (tuned loosely off one test clip) don't generalize across
+    # voices/mics — someone's natural pitch might sit above or below the global cutoff for
+    # reasons that have nothing to do with stress. Once a session has a few calm-looking
+    # samples to anchor to, judge relative to THIS speaker's own baseline instead.
+    if baseline and baseline["n"] >= MIN_BASELINE_SAMPLES and baseline["pitch_mean"] > 0:
+        if rate < baseline["rate"] * 0.55 and pitch_std < baseline["pitch_std"] * 0.6:
+            return "tired"
+        if (rate > baseline["rate"] * 1.45 or pitch_mean > baseline["pitch_mean"] * 1.25
+                or pitch_std > baseline["pitch_std"] * 1.8):
+            return "stressed"
+        return "calm"
 
     if rate < 1.8 and pitch_std < 15:
         return "tired"

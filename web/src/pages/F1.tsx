@@ -109,7 +109,7 @@ export default function F1() {
     const key = clip.date;
     setAnalyses((prev) => new Map(prev).set(key, { status: "pending" }));
     try {
-      const res = await api.f1Ingest(clip.recording_url);
+      const res = await api.f1Ingest(clip.recording_url, sessionKey ?? undefined, clip.driver_number);
       const ws = new WebSocket(`${location.origin.replace("http", "ws")}${res.ws_url}`);
       wsRefs.current.set(key, ws);
       ws.onmessage = (e) => {
