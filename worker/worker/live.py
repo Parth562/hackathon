@@ -28,6 +28,17 @@ from .stages.reconcile import assign_words, smooth, regroup
 # as someone already seen this session. Live-scoped matching gets its own, more forgiving bar.
 LIVE_MATCH_THRESHOLD = 0.60
 
+# batch's embed_min_s (1.5s) exists to keep genuinely-unusable slivers out of enrollment
+# data, but for a read-only live *match* it was blocking the attempt entirely on anything
+# shorter — a one-word "Hello?" or "1, 2, 3" chunk (well under 1.5s of actual speech) never
+# even got an embedding, so it could never be recognized no matter who enrolled. Lower floor
+# for live: reliability_score already penalizes a short/noisy embedding on its own, and
+# identify() scales its match threshold by that reliability, so this doesn't loosen the
+# actual matching decision — it just lets short speech attempt one, judged accordingly.
+# There's a real floor beneath which no algorithm reliably fingerprints a voice (a fraction
+# of a syllable), and this is a guess at where that floor sits, not a measured one.
+LIVE_EMBED_MIN_S = 0.5
+
 # label for a turn too short/unclear to embed at all — distinct from a real "Speaker N" so
 # it's never treated as a known, trackable identity (deliberately not pyannote's own raw
 # per-chunk label, which looks stable across chunks by coincidence but isn't — it resets
@@ -77,7 +88,7 @@ async def diarize_and_label(pool, cfg, audio: np.ndarray, words: list, session_s
 
     resolved = {}
     for label, label_turns in by_label.items():
-        emb, total, _ = embed_extract(audio, label_turns, cfg, pool)
+        emb, total, _ = embed_extract(audio, label_turns, cfg, pool, min_s=LIVE_EMBED_MIN_S)
         if emb is None:
             resolved[label] = (UNCLEAR_LABEL, False)  # too little audio for this speaker to embed at all
             continue

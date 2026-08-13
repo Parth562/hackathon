@@ -8,7 +8,12 @@ from common.speaker import reliability_score
 from ..ctx import SR, SpeakerResult
 
 
-def extract(audio_norm, turns, cfg, pool):
+def extract(audio_norm, turns, cfg, pool, min_s=None):
+    # min_s overrides cfg.embed_min_s — live mode passes a lower floor (see live.py) since
+    # its turns are naturally shorter than a whole clip's pooled best segments; reliability_score
+    # already penalizes a short embedding on its own, so this only changes whether an attempt
+    # is made at all, not how much weight a short embedding gets once identify() sees it
+    floor = cfg.embed_min_s if min_s is None else min_s
     usable = sorted([t for t in turns if not t["is_overlap"]],
                      key=lambda t: t["end"] - t["start"], reverse=True)
     chunks, total = [], 0.0
@@ -19,7 +24,7 @@ def extract(audio_norm, turns, cfg, pool):
         if total >= cfg.embed_target_s:
             break
 
-    if total < cfg.embed_min_s:
+    if total < floor:
         return None, total, len(chunks)
 
     x = torch.from_numpy(np.concatenate(chunks)).unsqueeze(0)
