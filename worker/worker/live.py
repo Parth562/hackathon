@@ -20,8 +20,22 @@ from .stages.diarize import clean_turns
 from .stages.embed import extract as embed_extract
 from .stages.reconcile import assign_words, smooth, regroup
 
+# batch mode's cluster_threshold (0.76) is tuned for embeddings pooled from up to
+# embed_target_s=8s of a person's cleanest turns across a whole clip. A single live chunk
+# usually can't offer that much of one speaker, so its embeddings are noisier — matched
+# 1:1 against cluster_threshold, the same person's own voice was falling below it chunk to
+# chunk, fragmenting into a new "Speaker N" almost every time instead of being recognized
+# as someone already seen this session. Live-scoped matching gets its own, more forgiving bar.
+LIVE_MATCH_THRESHOLD = 0.60
 
-def _match_session_speaker(embedding: np.ndarray, session_speakers: list, threshold: float) -> str:
+# label for a turn too short/unclear to embed at all — distinct from a real "Speaker N" so
+# it's never treated as a known, trackable identity (deliberately not pyannote's own raw
+# per-chunk label, which looks stable across chunks by coincidence but isn't — it resets
+# arbitrarily every diarization call and was being displayed as if it tracked one person)
+UNCLEAR_LABEL = "Speaker (unclear)"
+
+
+def _match_session_speaker(embedding: np.ndarray, session_speakers: list, threshold: float = LIVE_MATCH_THRESHOLD) -> str:
     best_i, best_sim = None, -1.0
     for i, s in enumerate(session_speakers):
         sim = float(np.dot(embedding, s["centroid"]))
@@ -65,17 +79,21 @@ async def diarize_and_label(pool, cfg, audio: np.ndarray, words: list, session_s
     for label, label_turns in by_label.items():
         emb, total, _ = embed_extract(audio, label_turns, cfg, pool)
         if emb is None:
-            resolved[label] = (label, False)  # too little audio for this speaker — keep raw pyannote label
+            resolved[label] = (UNCLEAR_LABEL, False)  # too little audio for this speaker to embed at all
             continue
         reliability = sc.reliability_score(total, quality, cfg)
+        # no reliability gate here before attempting identify() — sc.identify() already
+        # scales its own match threshold by reliability internally (stricter when lower,
+        # not skipped), matching how the batch pipeline calls it. Gating the attempt on
+        # top of that just meant a real enrolled match was never even tried for anything
+        # short of a live chunk, falling straight to a fresh session-local label instead.
+        m = await sc.identify(emb, reliability, cfg)
         display, is_known = None, False
-        if reliability >= cfg.reliability_fair:
-            m = await sc.identify(emb, reliability, cfg)
-            if m.result in ("confident", "suggested") and m.profile_id:
-                display = await db.fetchval("SELECT display_name FROM speaker_profiles WHERE id=$1", m.profile_id)
-                is_known = display is not None
+        if m.result in ("confident", "suggested") and m.profile_id:
+            display = await db.fetchval("SELECT display_name FROM speaker_profiles WHERE id=$1", m.profile_id)
+            is_known = display is not None
         if display is None:
-            display = _match_session_speaker(emb, session_speakers, cfg.cluster_threshold)
+            display = _match_session_speaker(emb, session_speakers)
         resolved[label] = (display, is_known)
 
     for t in turns:
