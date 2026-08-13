@@ -7,16 +7,23 @@ import { cn } from "@/lib/utils";
 import { type Mood, MOOD_STYLE, moodDot } from "@/lib/mood";
 import { Mic, Square, Loader2 } from "lucide-react";
 
-// longer chunks = fewer mid-word cuts at chunk boundaries (a real accuracy cost —
-// each cut splits a word across two independent ASR calls, garbling both halves).
-// GPU transcription is ~1s per chunk, so 7s chunks still feel responsive.
-const CHUNK_MS = 7000;
+// VAD-driven chunk boundaries: cut on a natural pause instead of an arbitrary timer, so
+// chunks end at sentence/phrase breaks rather than mid-word — the single biggest source
+// of garbled live text. Naive fixed-threshold energy VAD (not adaptive to noise floor or
+// mic gain) — good enough to find pauses in a normal room; may need retuning on a very
+// noisy input or a hot mic.
+const SPEECH_RMS_THRESHOLD = 0.02;
+const PAUSE_MS = 600; // silence this long after speech = natural end of phrase, cut here
+const MIN_CHUNK_MS = 1200; // don't cut on a micro-pause before this much has been said
+const MAX_CHUNK_MS = 12000; // hard cap so continuous talk without a pause can't grow forever
 
 type ChunkStatus = "pending" | "done" | "error";
 type Chunk = { seq: number; text: string; status: ChunkStatus; mood?: Mood };
+type VadState = { start: number; hasSpeech: boolean; silenceSince: number | null };
 
 export default function Live() {
   const [recording, setRecording] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
   const [chunks, setChunks] = useState<Chunk[]>([]);
   const sessionIdRef = useRef<string | null>(null);
   const seqRef = useRef(0);
@@ -25,31 +32,73 @@ export default function Live() {
   const wsRef = useRef<WebSocket | null>(null);
   const stopRequestedRef = useRef(false);
 
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const vadBufRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const vadStateRef = useRef<VadState>({ start: 0, hasSpeech: false, silenceSince: null });
+  const rafRef = useRef<number | null>(null);
+
   useEffect(() => () => stop(), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  function vadTick() {
+    const analyser = analyserRef.current, buf = vadBufRef.current;
+    if (stopRequestedRef.current || !analyser || !buf) return;
+
+    analyser.getByteTimeDomainData(buf);
+    let sumSquares = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = (buf[i] - 128) / 128;
+      sumSquares += v * v;
+    }
+    const rms = Math.sqrt(sumSquares / buf.length);
+
+    const state = vadStateRef.current;
+    const now = performance.now();
+    const isSpeech = rms > SPEECH_RMS_THRESHOLD;
+    if (isSpeech) {
+      state.hasSpeech = true;
+      state.silenceSince = null;
+    } else if (state.silenceSince == null) {
+      state.silenceSince = now;
+    }
+    setSpeaking((prev) => (prev !== isSpeech ? isSpeech : prev));
+
+    const elapsed = now - state.start;
+    const pausedLongEnough = state.hasSpeech && state.silenceSince != null && (now - state.silenceSince) >= PAUSE_MS;
+    const shouldCut = (elapsed >= MIN_CHUNK_MS && pausedLongEnough) || elapsed >= MAX_CHUNK_MS;
+
+    if (shouldCut && recorderRef.current?.state === "recording") {
+      recorderRef.current.stop();
+    }
+    rafRef.current = requestAnimationFrame(vadTick);
+  }
+
   // MediaRecorder chunks from a single continuous recording aren't independently
-  // decodable (only the first has a full container header) — so each ~5s window is
-  // its own start/stop recorder instance, each producing one self-contained webm file.
+  // decodable (only the first has a full container header) — so each VAD-bounded
+  // window is its own start/stop recorder instance, each a self-contained webm file.
   function recordOneChunk(stream: MediaStream) {
     if (stopRequestedRef.current) return;
     const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
     recorderRef.current = recorder;
+    vadStateRef.current = { start: performance.now(), hasSpeech: false, silenceSince: null };
     const seq = seqRef.current++;
     const parts: BlobPart[] = [];
 
     recorder.ondataavailable = (e) => { if (e.data.size > 0) parts.push(e.data); };
     recorder.onstop = async () => {
-      const blob = new Blob(parts, { type: "audio/webm" });
-      setChunks((prev) => [...prev, { seq, text: "", status: "pending" }]);
-      try {
-        await api.uploadLiveChunk(sessionIdRef.current!, seq, blob);
-      } catch {
-        setChunks((prev) => prev.map((c) => (c.seq === seq ? { ...c, status: "error" } : c)));
+      const hadSpeech = vadStateRef.current.hasSpeech;
+      if (hadSpeech) {
+        const blob = new Blob(parts, { type: "audio/webm" });
+        setChunks((prev) => [...prev, { seq, text: "", status: "pending" }]);
+        try {
+          await api.uploadLiveChunk(sessionIdRef.current!, seq, blob);
+        } catch {
+          setChunks((prev) => prev.map((c) => (c.seq === seq ? { ...c, status: "error" } : c)));
+        }
       }
       if (!stopRequestedRef.current && streamRef.current) recordOneChunk(streamRef.current);
     };
     recorder.start();
-    setTimeout(() => { if (recorder.state === "recording") recorder.stop(); }, CHUNK_MS);
   }
 
   async function start() {
@@ -58,6 +107,14 @@ export default function Live() {
     stopRequestedRef.current = false;
     seqRef.current = 0;
     setChunks([]);
+
+    const audioCtx = new AudioContext();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    audioCtx.createMediaStreamSource(stream).connect(analyser);
+    audioCtxRef.current = audioCtx;
+    analyserRef.current = analyser;
+    vadBufRef.current = new Uint8Array(new ArrayBuffer(analyser.fftSize));
 
     const sessionId = crypto.randomUUID();
     sessionIdRef.current = sessionId;
@@ -73,6 +130,7 @@ export default function Live() {
 
     setRecording(true);
     recordOneChunk(stream);
+    rafRef.current = requestAnimationFrame(vadTick);
   }
 
   function stop() {
@@ -80,7 +138,12 @@ export default function Live() {
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     wsRef.current?.close();
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    audioCtxRef.current?.close();
+    audioCtxRef.current = null;
+    analyserRef.current = null;
     setRecording(false);
+    setSpeaking(false);
   }
 
   const transcript = chunks.map((c) => c.text).filter(Boolean).join(" ");
@@ -92,7 +155,7 @@ export default function Live() {
     <div>
       <PageHeader
         title="Live transcription"
-        description="Speak into your mic — transcript and stress read appear in ~5-8s chunks. Diarization and full audio quality analysis aren't run live; upload the recording afterward for the full pipeline."
+        description="Speak into your mic — each chunk cuts on your next pause, not a fixed timer, so words don't get split mid-sentence. Diarization and full audio quality analysis aren't run live; upload the recording afterward for the full pipeline."
       />
 
       <div className="mx-auto max-w-2xl px-8 py-8">
@@ -116,11 +179,16 @@ export default function Live() {
         {recording && (
           <div className="mt-4 flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <span className="relative flex size-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive opacity-75" />
-              <span className="relative inline-flex size-2 rounded-full bg-destructive" />
+              <span className={cn(
+                "absolute inline-flex h-full w-full rounded-full opacity-75",
+                speaking ? "animate-ping bg-primary" : "bg-destructive animate-ping"
+              )} />
+              <span className={cn("relative inline-flex size-2 rounded-full", speaking ? "bg-primary" : "bg-destructive")} />
             </span>
-            recording — {pendingCount > 0 && <Loader2 className="size-3 animate-spin" />}
-            {pendingCount > 0 ? `transcribing chunk ${chunks.length - pendingCount + 1}` : "listening"}
+            {pendingCount > 0 && <Loader2 className="size-3 animate-spin" />}
+            {pendingCount > 0
+              ? `transcribing chunk ${chunks.length - pendingCount + 1}`
+              : speaking ? "hearing you…" : "listening for a pause…"}
           </div>
         )}
 
