@@ -13,6 +13,31 @@ def merge_adjacent(turns, max_gap):
     return out
 
 
+def drop_onset_phantoms(turns, start_tol=0.3, dur_ratio=0.6):
+    # pyannote sometimes emits a brief, confidently-labeled conflicting-speaker turn at
+    # almost exactly the same instant a real (longer) turn from someone else begins —
+    # not genuine cross-talk, just the clustering being unsettled in the first fraction
+    # of a second before it locks onto the actual speaker. Left in, word-to-turn
+    # reconciliation (reconcile.assign_words) picks whichever turn overlaps more per
+    # word, splitting one continuous sentence across two speaker labels right at the
+    # boundary — high per-word confidence either way, so smoothing can't catch it.
+    # A turn that starts within `start_tol`s of a much longer different-speaker turn's
+    # own start is almost certainly this artifact, not real simultaneous speech.
+    drop = set()
+    for i, a in enumerate(turns):
+        a_dur = a["end"] - a["start"]
+        for j, b in enumerate(turns):
+            if i == j or a["label"] == b["label"]:
+                continue
+            b_dur = b["end"] - b["start"]
+            if b_dur <= a_dur:
+                continue
+            if abs(a["start"] - b["start"]) <= start_tol and a_dur < dur_ratio * b_dur:
+                drop.add(i)
+                break
+    return [t for i, t in enumerate(turns) if i not in drop]
+
+
 def annotate_overlaps(turns):
     for t in turns:
         t["is_overlap"] = False
@@ -46,6 +71,7 @@ def snap_to_vad(turns, vad, tol):
 def clean_turns(raw, vad, cfg):
     t = sorted(raw, key=lambda x: x["start"])
     t = [x for x in t if x["end"] - x["start"] >= cfg.min_turn_s]
+    t = drop_onset_phantoms(t)
     t = merge_adjacent(t, cfg.merge_gap_s)
     t = annotate_overlaps(t)
     t = snap_to_vad(t, vad, cfg.vad_snap_tol_s)
