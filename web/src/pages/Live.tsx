@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/api/client";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { type Mood, MOOD_STYLE, moodDot } from "@/lib/mood";
-import { Mic, Square, Loader2, AudioLines } from "lucide-react";
+import { speakerColor } from "@/lib/speaker-color";
+import { Mic, Square, Loader2, AudioLines, Users } from "lucide-react";
 
 // VAD-driven chunk boundaries: cut on a natural pause instead of an arbitrary timer, so
 // chunks end at sentence/phrase breaks rather than mid-word — the single biggest source
@@ -19,7 +20,8 @@ const MAX_CHUNK_MS = 12000; // hard cap so continuous talk without a pause can't
 const LEVEL_NORMALIZER = 0.12; // rms value that reads as "full" on the level ring
 
 type ChunkStatus = "pending" | "done" | "error";
-type Chunk = { seq: number; text: string; status: ChunkStatus; mood?: Mood; t: number };
+type Segment = { label: string; is_known: boolean; start: number; end: number; text: string };
+type Chunk = { seq: number; text: string; segments: Segment[]; status: ChunkStatus; mood?: Mood; t: number };
 type VadState = { start: number; hasSpeech: boolean; silenceSince: number | null };
 
 function fmtElapsed(ms: number) {
@@ -107,7 +109,7 @@ export default function Live() {
       const hadSpeech = vadStateRef.current.hasSpeech;
       if (hadSpeech) {
         const blob = new Blob(parts, { type: "audio/webm" });
-        setChunks((prev) => [...prev, { seq, text: "", status: "pending", t: performance.now() - sessionStartRef.current }]);
+        setChunks((prev) => [...prev, { seq, text: "", segments: [], status: "pending", t: performance.now() - sessionStartRef.current }]);
         try {
           await api.uploadLiveChunk(sessionIdRef.current!, seq, blob);
         } catch {
@@ -141,10 +143,14 @@ export default function Live() {
 
     const ws = new WebSocket(`${location.origin.replace("http", "ws")}/v1/ws/jobs/${sessionId}`);
     ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data) as { type: string; seq: number; text: string; mood?: Mood; error?: string };
+      const msg = JSON.parse(e.data) as {
+        type: string; seq: number; text: string; mood?: Mood; segments?: Segment[]; error?: string;
+      };
       if (msg.type !== "live_transcript") return;
       setChunks((prev) => prev.map((c) =>
-        c.seq === msg.seq ? { ...c, text: msg.text, mood: msg.mood, status: msg.error ? "error" : "done" } : c));
+        c.seq === msg.seq
+          ? { ...c, text: msg.text, mood: msg.mood, segments: msg.segments || [], status: msg.error ? "error" : "done" }
+          : c));
     };
     wsRef.current = ws;
 
@@ -175,11 +181,20 @@ export default function Live() {
   const currentMood = doneChunks.length ? doneChunks[doneChunks.length - 1].mood : undefined;
   const wordCount = transcript ? transcript.trim().split(/\s+/).length : 0;
 
+  // distinct speakers seen this session, in first-appearance order — diarization runs
+  // per chunk (see worker/worker/live.py), so this is what stitches those chunk-scoped
+  // reads into "who's been talking" for the whole session
+  const speakers = useMemo(() => {
+    const seen = new Map<string, boolean>();
+    for (const c of chunks) for (const s of c.segments) if (!seen.has(s.label)) seen.set(s.label, s.is_known);
+    return Array.from(seen, ([label, isKnown]) => ({ label, isKnown }));
+  }, [chunks]);
+
   return (
     <div>
       <PageHeader
         title="Live transcription"
-        description="Speak into your mic — each chunk cuts on your next pause, not a fixed timer, so words don't get split mid-sentence. Diarization and full audio quality analysis aren't run live; upload the recording afterward for the full pipeline."
+        description="Speak into your mic — each chunk cuts on your next pause, not a fixed timer, so words don't get split mid-sentence. Speakers are identified against enrolled profiles where possible, otherwise labeled for this session only. Full audio quality analysis still needs the recording uploaded for the full pipeline."
       />
 
       <div className="mx-auto max-w-2xl px-8 py-10">
@@ -272,10 +287,39 @@ export default function Live() {
 
               <p className="mb-2 text-xs font-medium text-muted-foreground">Live transcript</p>
               <p className="whitespace-pre-wrap text-lg leading-relaxed">
-                {transcript || <span className="text-muted-foreground">Listening…</span>}
+                {chunks.some((c) => c.segments.length > 0) ? (
+                  chunks.map((c) =>
+                    c.segments.length > 0 ? (
+                      c.segments.map((s, i) => (
+                        <span key={`${c.seq}-${i}`} className={cn("rounded px-0.5", speakerColor(s.label).chip)}>
+                          {s.text}{" "}
+                        </span>
+                      ))
+                    ) : c.text ? (
+                      <span key={c.seq}>{c.text} </span>
+                    ) : null
+                  )
+                ) : (
+                  transcript || <span className="text-muted-foreground">Listening…</span>
+                )}
                 {pendingCount > 0 && <span className="animate-pulse text-muted-foreground"> …</span>}
               </p>
             </div>
+
+            {speakers.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 animate-slide-up">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Users className="size-3.5" /> Speakers
+                </span>
+                {speakers.map((s) => (
+                  <span key={s.label} className={cn("flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs", speakerColor(s.label).chip)}>
+                    <span className={cn("size-1.5 rounded-full", speakerColor(s.label).dot)} />
+                    {s.label}
+                    {!s.isKnown && <span className="text-[10px] opacity-70">(this session)</span>}
+                  </span>
+                ))}
+              </div>
+            )}
 
             {chunks.length > 0 && (
               <div className="mt-4 animate-slide-up space-y-1.5">
@@ -293,10 +337,21 @@ export default function Live() {
                       c.status === "done" && "bg-success",
                       c.status === "error" && "bg-destructive"
                     )} />
-                    <span className="flex-1 text-foreground/90">
+                    <span className="flex-1 space-y-1 text-foreground/90">
                       {c.status === "pending" && <span className="text-muted-foreground">transcribing…</span>}
                       {c.status === "error" && <span className="text-destructive">failed to transcribe</span>}
-                      {c.status === "done" && (c.text || <span className="text-muted-foreground">(no speech detected)</span>)}
+                      {c.status === "done" && c.segments.length > 0 ? (
+                        c.segments.map((s, i) => (
+                          <div key={i} className="flex items-baseline gap-1.5">
+                            <Badge variant="outline" className={cn("shrink-0 rounded-full px-1.5 py-0 text-[10px]", speakerColor(s.label).chip)}>
+                              {s.label}
+                            </Badge>
+                            <span>{s.text}</span>
+                          </div>
+                        ))
+                      ) : c.status === "done" ? (
+                        c.text || <span className="text-muted-foreground">(no speech detected)</span>
+                      ) : null}
                     </span>
                     {c.mood && c.status === "done" && (
                       <Badge variant="outline" className={cn("shrink-0 rounded-full px-2 py-0 text-[11px] capitalize", MOOD_STYLE[c.mood])}>
