@@ -7,6 +7,7 @@ import Layout from "@/components/layout";
 import Library from "./pages/Library";
 import Upload from "./pages/Upload";
 import Live from "./pages/Live";
+import F1 from "./pages/F1";
 import ClipDetail from "./pages/ClipDetail";
 import Speakers from "./pages/Speakers";
 import Settings from "./pages/Settings";
@@ -20,6 +21,7 @@ function App() {
           <Route path="/" element={<Library />} />
           <Route path="/upload" element={<Upload />} />
           <Route path="/live" element={<Live />} />
+          <Route path="/f1" element={<F1 />} />
           <Route path="/clips/:id" element={<ClipDetail />} />
           <Route path="/speakers" element={<Speakers />} />
           <Route path="/settings" element={<Settings />} />

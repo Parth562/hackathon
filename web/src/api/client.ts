@@ -75,4 +75,18 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ category, repo_id }),
     }),
+  f1Sessions: (year?: number) =>
+    req(`/v1/f1/sessions${year ? `?year=${year}` : ""}`),
+  f1Drivers: (sessionKey: number) => req(`/v1/f1/drivers?session_key=${sessionKey}`),
+  f1Laps: (sessionKey: number, driverNumber: number) =>
+    req(`/v1/f1/laps?session_key=${sessionKey}&driver_number=${driverNumber}`),
+  f1TeamRadio: (sessionKey: number, driverNumber: number) =>
+    req(`/v1/f1/team_radio?session_key=${sessionKey}&driver_number=${driverNumber}`),
+  f1TeamRadioAll: (sessionKey: number) => req(`/v1/f1/team_radio?session_key=${sessionKey}`),
+  f1Ingest: (recording_url: string) =>
+    req("/v1/f1/ingest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recording_url }),
+    }),
 };

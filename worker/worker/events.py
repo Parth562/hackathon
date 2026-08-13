@@ -25,3 +25,11 @@ async def emit_live(session_id: str, seq: int, text: str, error: str | None = No
     await _redis.publish(f"job:{session_id}",
                           json.dumps({"type": "live_transcript", "seq": seq, "text": text,
                                       "error": error, "t": time.time()}))
+
+
+async def emit_f1_result(job_id: str, text: str, mood: str, features: dict | None, error: str | None = None):
+    if _redis is None:
+        return
+    await _redis.publish(f"job:{job_id}",
+                          json.dumps({"type": "f1_result", "text": text, "mood": mood,
+                                      "features": features, "error": error, "t": time.time()}))

@@ -13,8 +13,9 @@ from .audio.decode import decode_to_array
 from .audio.enhance import highpass, loudness_normalize
 from .pool import ModelPool
 from .pipeline import process_clip
-from .events import init_events, emit_live
+from .events import init_events, emit_live, emit_f1_result
 from .stages.transcribe import compression_ratio, BOILERPLATE
+from .audio import tone as tone_mod
 
 log = structlog.get_logger()
 
@@ -133,8 +134,49 @@ async def transcribe_live_chunk_job(ctx, session_id: str, chunk_rel_path: str, s
     await emit_live(session_id, seq, text, error)
 
 
+async def analyze_f1_radio_job(ctx, job_id: str, rel_path: str):
+    cfg = get_settings()
+    path = storage.resolve(cfg, rel_path)
+    text, mood, features, error = "", "calm", tone_mod.NEUTRAL_FEATURES, None
+    try:
+        async with ctx["live_sem"]:
+            audio = await asyncio.to_thread(decode_to_array, path, SR)
+            audio = await asyncio.to_thread(_precondition, audio, cfg)
+            duration_s = len(audio) / SR
+
+            # ASR and tone analysis are independent signals from the same audio — a
+            # whisper hiccup (e.g. vad_filter finding literally 0 speech in a short
+            # "copy" acknowledgement) shouldn't also blank out the tone read, and vice versa
+            try:
+                segments, _ = await asyncio.to_thread(
+                    ctx["pool"].asr.transcribe, audio, beam_size=cfg.asr_beam_size, word_timestamps=False,
+                    condition_on_previous_text=False, temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+                    compression_ratio_threshold=2.4, log_prob_threshold=-1.0,
+                    no_speech_threshold=0.6, vad_filter=True)
+                segs = [{"text": s.text.strip(), "avg_logprob": s.avg_logprob, "no_speech_prob": s.no_speech_prob}
+                        for s in segments]
+                text = " ".join(s["text"] for s in segs
+                                 if not _is_hallucination(s["text"], s["avg_logprob"], s["no_speech_prob"])).strip()
+            except ValueError as e:
+                if "empty sequence" not in str(e):
+                    raise
+
+            word_count = len(text.split())
+            features = await asyncio.to_thread(tone_mod.extract_features, audio, SR, word_count, duration_s)
+            mood = tone_mod.classify(features)
+    except Exception as e:
+        error = str(e)[:200]
+        log.warning("f1_radio_failed", job_id=job_id, error=error)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    await emit_f1_result(job_id, text, mood, features, error)
+
+
 class WorkerSettings:
-    functions = [process_clip_job, transcribe_live_chunk_job]
+    functions = [process_clip_job, transcribe_live_chunk_job, analyze_f1_radio_job]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)

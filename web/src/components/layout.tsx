@@ -1,11 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { AudioLines, Upload, Users, SlidersHorizontal, Mic } from "lucide-react";
+import { AudioLines, Upload, Users, SlidersHorizontal, Mic, Flag } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { to: "/", label: "Library", icon: AudioLines, end: true },
   { to: "/upload", label: "Upload", icon: Upload, end: false },
   { to: "/live", label: "Live", icon: Mic, end: false },
+  { to: "/f1", label: "Race Radio", icon: Flag, end: false },
   { to: "/speakers", label: "Speakers", icon: Users, end: false },
   { to: "/settings", label: "Settings", icon: SlidersHorizontal, end: false },
 ];

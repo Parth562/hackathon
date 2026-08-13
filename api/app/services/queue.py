@@ -31,3 +31,7 @@ async def enqueue_clip(clip_id: str) -> str:
 async def enqueue_live_chunk(session_id: str, chunk_rel_path: str, seq: int):
     await _redis.enqueue_job("transcribe_live_chunk_job", session_id, chunk_rel_path, seq,
                               _job_id=f"live-{session_id}-{seq}-{uuid.uuid4().hex[:8]}")
+
+
+async def enqueue_f1_radio(job_id: str, rel_path: str):
+    await _redis.enqueue_job("analyze_f1_radio_job", job_id, rel_path, _job_id=f"f1-{job_id}")
