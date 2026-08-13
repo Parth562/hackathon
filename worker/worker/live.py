@@ -104,7 +104,13 @@ async def diarize_and_label(pool, cfg, audio: np.ndarray, words: list, session_s
             display = await db.fetchval("SELECT display_name FROM speaker_profiles WHERE id=$1", m.profile_id)
             is_known = display is not None
         if display is None:
-            display = _match_session_speaker(emb, session_speakers)
+            # minting a brand-new persistent "Speaker N" on a low-reliability embedding is
+            # how one noisy/uncertain moment (echo, a stray click, background noise briefly
+            # reading as "voiced") turns into a permanent fake extra person for the rest of
+            # the session. A confident-enough embedding that genuinely matches no one so far
+            # is trusted as a real new speaker; a shaky one is left unclear instead — it can
+            # still resolve later once a cleaner chunk of that same voice comes through.
+            display = _match_session_speaker(emb, session_speakers) if reliability >= cfg.reliability_fair else UNCLEAR_LABEL
         resolved[label] = (display, is_known)
 
     for t in turns:
